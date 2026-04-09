@@ -1,0 +1,274 @@
+# ═══════════════════════════════════════════════════════════════
+# swarm_config.yml — THE user-facing control surface
+# ═══════════════════════════════════════════════════════════════
+# This file defines EVERYTHING about your research swarm:
+# personas, tools, LLM backend, reviewer constraints, and prompts.
+#
+# Fork this repo → edit this file → run your own domain-specific swarm.
+# You should NEVER need to edit Python code to customize behavior.
+#
+# GETTING STARTED:
+#   1. Edit the 'swarm' section below to name your swarm and set the domain.
+#   2. Rename the personas to match your team (e.g., rename "Specialist1" to
+#      "EpiScope" or "PolicyAnalyst").
+#   3. Edit each persona's 'persona_file' path to match the new name.
+#   4. Rename the corresponding folder in agents/ to match.
+#   5. Populate agents/YourAgent/KB/ with domain-specific documents.
+#   6. Customize the reviewer constraints for your domain's standards.
+#   7. Run: make ingest && make run PROMPT="Your first research question"
+#
+# Or use the interactive builder:
+#   python -m automation.main init
+# ═══════════════════════════════════════════════════════════════
+
+# ── Swarm Identity ───────────────────────────────────
+swarm:
+  name: "My-Research-Swarm"
+  description: "Autonomous research swarm for [your domain]"
+  output_dir: "./Drafts"
+  traceability_matrix: "./Knowledge_Traceability_Matrix.md"
+
+# ── Orchestrator Settings ────────────────────────────
+# Controls the multi-agent supervisor pattern.
+# agent:                    persona name that acts as orchestrator (must exist in personas list)
+# journalist:               persona name that writes final structured output
+# max_agent_calls:          total specialist invocations before forcing Journalist
+# max_tool_rounds_per_agent: tool-use loop limit inside each specialist call
+orchestrator:
+  agent: "Orchestrator"
+  journalist: "Journalist"
+  max_agent_calls: 8
+  max_tool_rounds_per_agent: 5
+
+# ── LLM Backend ─────────────────────────────────────
+# Supported providers: openai, anthropic, google
+# Change provider and name to switch the model used by all agents.
+# Use 'python -m automation.main model configure' to change this interactively.
+model:
+  provider: "openai"
+  name: "gpt-4o"
+  temperature: 0.2
+  env_key: "OPENAI_API_KEY"
+
+# ── Personas ─────────────────────────────────────────
+# Each persona has a name, icon, role description, a persona file
+# loaded at runtime (the persona.md in agents/), and a list of
+# tool keys (from the tools section below) they are allowed to use.
+#
+# To add a persona: python -m automation.main persona add
+# To edit a persona: python -m automation.main persona edit
+# To preview the team: python -m automation.main preview
+personas:
+  - name: "Orchestrator"
+    icon: "👑"
+    role: "Research orchestrator — coordinates specialists, synthesizes findings, manages task decomposition"
+    persona_file: "./agents/Orchestrator/persona.md"
+    tools:
+      - search_web
+      - search_literature
+      - search_kb
+      - append_traceability
+
+  - name: "Specialist1"
+    icon: "🔬"
+    role: "Domain specialist 1 — rename and customize for your first area of expertise"
+    persona_file: "./agents/Specialist1/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - you_research
+      - lookup_doi
+
+  - name: "Specialist2"
+    icon: "📊"
+    role: "Domain specialist 2 — rename and customize for your second area of expertise"
+    persona_file: "./agents/Specialist2/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - you_research
+      - lookup_doi
+
+  - name: "LitScout"
+    icon: "📚"
+    role: "Literature cartographer — citation chaining, landmark-paper identification, author-trail expansion"
+    persona_file: "./agents/LitScout/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - trace_literature_network
+      - lookup_doi
+      - scrape_page
+
+  - name: "Journalist"
+    icon: "✍️"
+    role: "Observer & Scribe — structured, neutral final output"
+    persona_file: "./agents/Journalist/persona.md"
+    tools:
+      - write_section
+      - append_traceability
+      - git_snapshot
+
+# ── Tools Registry ───────────────────────────────────
+# Map logical tool names to Python module + function.
+# To add a custom tool: create a Python function decorated
+# with @tool, then register it here.
+# Use 'python -m automation.main tools add' to add tools interactively.
+tools:
+  search_literature:
+    module: "automation.tools"
+    function: "search_pubmed"
+    description: "Search PubMed for peer-reviewed biomedical literature"
+
+  search_web:
+    module: "automation.tools"
+    function: "search_you_engine"
+    description: "Search the live web via You.com API"
+
+  check_schema_org:
+    module: "automation.tools"
+    function: "check_schema_org"
+    description: "Validate terms against the Schema.org vocabulary"
+
+  write_section:
+    module: "automation.tools"
+    function: "write_manuscript_section"
+    description: "Write a drafted section to disk as Markdown"
+
+  append_traceability:
+    module: "automation.tools"
+    function: "append_traceability_matrix"
+    description: "Log a fact and its source to the Knowledge Traceability Matrix"
+
+  search_kb:
+    module: "automation.tools"
+    function: "search_knowledge_base"
+    description: "Search the local vectorized Knowledge Base documents"
+
+  scrape_page:
+    module: "automation.tools"
+    function: "scrape_webpage"
+    description: "Fetch and extract full text content from a URL"
+
+  search_preprints:
+    module: "automation.tools"
+    function: "search_semantic_scholar"
+    description: "Search Semantic Scholar for preprints, CHI papers, and recent publications not yet on PubMed"
+
+  trace_literature_network:
+    module: "automation.tools"
+    function: "trace_literature_network"
+    description: "Expand a major paper through its references and lead authors to surface adjacent literature"
+
+  you_research:
+    module: "automation.tools"
+    function: "you_research"
+    description: "You.com Research API: multi-step web synthesis with inline citations for a specific sub-question"
+
+  lookup_doi:
+    module: "automation.tools"
+    function: "lookup_doi"
+    description: "Look up full citation metadata (title, authors, DOI, abstract, OA PDF) via Europe PMC and Crossref — no API key required"
+
+  git_snapshot:
+    module: "automation.tools"
+    function: "git_commit_snapshot"
+    description: "Commit swarm output files (Drafts/ and traceability matrix) to git"
+
+# ── Reviewer-2 (Adversarial Checkpoint) ──────────────
+# The Reviewer gates all final outputs. Customize its
+# constraints for your domain's epistemological standards.
+#
+# Use 'python -m automation.main review configure' to edit interactively.
+reviewer:
+  enabled: true
+  max_revision_loops: 3
+
+  # Words that trigger automatic rejection
+  banned_words:
+    - "groundbreaking"
+    - "revolutionary"
+    - "game-changing"
+    - "paradigm-shifting"
+    - "unprecedented"
+
+  # Structural elements the output MUST contain
+  # Customize these for your domain's reporting standards.
+  required_elements:
+    - "a short limitations section"
+    - "in-text citations (e.g., [1], [2])"
+    - "a formal 'References' or 'Reference List' section at the bottom"
+
+  # Patterns that trigger automatic rejection
+  # Add domain-specific claims that must be rejected if unsupported.
+  rejection_patterns:
+    - "any causal claim that is not supported by experimental or longitudinal evidence"
+
+  # Tone enforcement
+  tone: "strictly factual, objective, and neutral"
+
+  # Optional: use a dedicated model for Reviewer-2 to create adversarial diversity.
+  # Merges on top of the main model config — only override what differs.
+  # Higher temperature (0.7–0.9) makes the reviewer more likely to find flaws.
+  # If omitted, Reviewer-2 uses the same model as the research agents.
+  #
+  # ── Same provider, higher temperature ──────────────────────────────────────
+  model:
+    name: "gpt-4o"
+    temperature: 0.8
+  #
+  # ── Cross-provider adversarial diversity (recommended for stronger review) ──
+  # A Claude model reviewing GPT-4o agent output (or vice versa) brings
+  # genuinely different training biases and response patterns to the review.
+  # Uncomment and substitute credentials to enable:
+  #
+  # model:
+  #   provider: "anthropic"
+  #   name: "claude-opus-4-6"
+  #   temperature: 0.8
+  #   env_key: "ANTHROPIC_API_KEY"
+  #
+  # Or with Google Gemini as the adversarial reviewer:
+  # model:
+  #   provider: "google"
+  #   name: "gemini-1.5-pro"
+  #   temperature: 0.8
+  #   env_key: "GOOGLE_API_KEY"
+
+  # Optional: Override the auto-generated reviewer prompt entirely.
+  # Uncomment and edit to use a fully custom reviewer prompt.
+  # custom_prompt: |
+  #   You are a [domain] compliance reviewer. You read the agent output.
+  #   If the output contains [specific violation], REJECT it.
+
+# ── Human-in-the-Loop (HITL) Checkpoints ─────────────
+# When enabled, the swarm pauses at configured points and asks the user
+# a focused QC question before continuing. Uses LangGraph interrupt().
+# Set enabled: false for fully autonomous runs (default behavior).
+#
+# Available checkpoints:
+#   pre_flight      — confirm task scope before the graph starts (CLI prompt, no interrupt)
+#   post_plan       — approve/redirect the orchestrator's first routing decision
+#   pre_journalist  — add final framing instructions before the Journalist writes
+#   on_rejection    — reviewer rejected: choose REVISE / OVERRIDE / custom instructions
+hitl:
+  enabled: false
+  checkpoints:
+    - pre_flight
+    - post_plan
+    - pre_journalist
+    - on_rejection
+
+# ── Epistemic Tags ───────────────────────────────────
+# Tags used to classify knowledge claims in the traceability matrix.
+# Customize these to fit your domain's epistemology.
+epistemic_tags:
+  - "[FACT]"
+  - "[INFERENCE]"
+  - "[SPECULATION]"

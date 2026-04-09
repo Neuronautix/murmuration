@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "research-swarm"
+version = "0.2.0"
+description = "A configurable multi-agent research swarm built on LangGraph — deploy your own autonomous research team for any scientific domain"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Damien Huzard", email = "dhuzard@users.noreply.github.com"},
+]
+
+dependencies = [
+    "langchain>=0.3",
+    "langchain-openai>=0.3",
+    "langchain-core>=0.3",
+    "langchain-community>=0.3",
+    "langchain-text-splitters>=0.3",
+    "langgraph>=0.2",
+    "chromadb>=0.5",
+    "typer>=0.12",
+    "sentence-transformers>=3.0",
+    "pypdf>=4.0",
+    "python-dotenv>=1.0",
+    "questionary>=2.0",
+    "rich>=13.0",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "pydantic>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/dhuzard/piu-psych-swarm"
+"Bug Tracker" = "https://github.com/dhuzard/piu-psych-swarm/issues"
+
+[project.optional-dependencies]
+anthropic = ["langchain-anthropic>=0.3"]
+google = ["langchain-google-genai>=2.0"]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[project.scripts]
+swarm = "automation.main:app"
+
+[tool.setuptools.packages.find]
+include = ["automation*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]   # line length handled by formatter, not linter
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

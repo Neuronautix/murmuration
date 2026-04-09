@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+
+# Build / packaging artifacts
+*.egg-info/
+dist/
+build/
+
+# IDE / editor settings (personal, not project-wide)
+.vscode/
+.idea/
+*.code-workspace
+
+# Data and Vector Indexes
+.byegpt/
+chroma.sqlite3
+*.bin
+chroma_db/
+__chroma_db/
+automation/db/
+
+# Swarm runtime outputs — auto-generated, not source files
+# These accumulate during research runs and should not be committed.
+# Track the empty Drafts/ folder via Drafts/.gitkeep.
+Drafts/*.md
+Drafts/*.json
+Knowledge_Traceability_Matrix.md
+
+# OS
+.DS_Store
+Thumbs.db

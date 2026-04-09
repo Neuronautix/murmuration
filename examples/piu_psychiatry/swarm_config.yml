@@ -1,0 +1,285 @@
+# ═══════════════════════════════════════════════════════════════
+# swarm_config.yml — THE user-facing control surface
+# ═══════════════════════════════════════════════════════════════
+# This file defines EVERYTHING about your research swarm:
+# personas, tools, LLM backend, reviewer constraints, and prompts.
+# Fork this repo → edit this file → run your own domain-specific swarm.
+# You should NEVER need to edit Python code to customize behavior.
+# ═══════════════════════════════════════════════════════════════
+
+# ── Swarm Identity ───────────────────────────────────
+swarm:
+  name: "PIU-Psych-Squad"
+  description: "Autonomous Research Swarm for psychiatric study of problematic internet use"
+  output_dir: "./Drafts"
+  traceability_matrix: "./Knowledge_Traceability_Matrix.md"
+
+# ── Orchestrator Settings ────────────────────────────
+# Controls the multi-agent supervisor pattern.
+# agent:     persona name that acts as orchestrator (must exist in personas list)
+# journalist: persona name that writes final structured output
+# max_agent_calls:          total specialist invocations before forcing Journalist
+# max_tool_rounds_per_agent: tool-use loop limit inside each specialist call
+orchestrator:
+  agent: "Dr. Nexus"
+  journalist: "Journalist"
+  max_agent_calls: 8
+  max_tool_rounds_per_agent: 5
+
+# ── LLM Backend ─────────────────────────────────────
+# Supported providers: openai, anthropic, google
+model:
+  provider: "openai"
+  name: "gpt-4o"
+  temperature: 0.2
+  env_key: "OPENAI_API_KEY"
+
+# ── Personas ─────────────────────────────────────────
+# Each persona has a name, icon, role description, a persona file
+# loaded at runtime (the persona.md in agents/), and a list of
+# tool keys (from the tools section below) they are allowed to use.
+personas:
+  - name: "Dr. Nexus"
+    icon: "👑"
+    role: "Orchestrator & Synthesizer"
+    persona_file: "./agents/DrNexus/persona.md"
+    tools:
+      - search_web
+      - search_literature
+      - search_kb
+      - append_traceability
+
+  - name: "ClinicalPsych"
+    icon: "🧠"
+    role: "Clinical psychiatrist for diagnosis, impairment, and comorbidity"
+    persona_file: "./agents/ClinicalPsych/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - you_research
+      - lookup_doi
+
+  - name: "EpiScope"
+    icon: "📊"
+    role: "Epidemiologist and psychometrics reviewer"
+    persona_file: "./agents/EpiScope/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - you_research
+      - lookup_doi
+
+  - name: "LitScout"
+    icon: "📚"
+    role: "Scientific literature cartographer for citation chaining and author-trail expansion"
+    persona_file: "./agents/LitScout/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - trace_literature_network
+      - lookup_doi
+      - scrape_page
+
+  - name: "NeuroCogs"
+    icon: "🧪"
+    role: "Mechanisms and neurocognition specialist"
+    persona_file: "./agents/NeuroCogs/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - you_research
+      - lookup_doi
+
+  - name: "CarePath"
+    icon: "🛟"
+    role: "Intervention, prevention, and care pathways specialist"
+    persona_file: "./agents/CarePath/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - you_research
+      - lookup_doi
+
+  - name: "Journalist"
+    icon: "✍️"
+    role: "Observer & Scribe"
+    persona_file: "./agents/Journalist/persona.md"
+    tools:
+      - write_section
+      - append_traceability
+      - git_snapshot
+
+# ── Tools Registry ───────────────────────────────────
+# Map logical tool names to Python module + function.
+# To add a custom tool: create a Python function decorated
+# with @tool, then register it here.
+tools:
+  search_literature:
+    module: "automation.tools"
+    function: "search_pubmed"
+    description: "Search PubMed for peer-reviewed biomedical literature"
+
+  search_web:
+    module: "automation.tools"
+    function: "search_you_engine"
+    description: "Search the live web via You.com API"
+
+  check_schema_org:
+    module: "automation.tools"
+    function: "check_schema_org"
+    description: "Validate terms against the Schema.org vocabulary"
+
+  write_section:
+    module: "automation.tools"
+    function: "write_manuscript_section"
+    description: "Write a drafted section to disk as Markdown"
+
+  append_traceability:
+    module: "automation.tools"
+    function: "append_traceability_matrix"
+    description: "Log a fact and its source to the Knowledge Traceability Matrix"
+
+  search_kb:
+    module: "automation.tools"
+    function: "search_knowledge_base"
+    description: "Search the local vectorized Knowledge Base documents"
+
+  scrape_page:
+    module: "automation.tools"
+    function: "scrape_webpage"
+    description: "Fetch and extract full text content from a URL"
+
+  search_preprints:
+    module: "automation.tools"
+    function: "search_semantic_scholar"
+    description: "Search Semantic Scholar for preprints, CHI papers, and recent publications not yet on PubMed"
+
+  trace_literature_network:
+    module: "automation.tools"
+    function: "trace_literature_network"
+    description: "Expand a major paper through its references and lead authors to surface adjacent literature"
+
+  you_research:
+    module: "automation.tools"
+    function: "you_research"
+    description: "You.com Research API: multi-step web synthesis with inline citations for a specific sub-question"
+
+  lookup_doi:
+    module: "automation.tools"
+    function: "lookup_doi"
+    description: "Look up full citation metadata (title, authors, DOI, abstract, OA PDF) via Europe PMC and Crossref — no API key required"
+
+  git_snapshot:
+    module: "automation.tools"
+    function: "git_commit_snapshot"
+    description: "Commit swarm output files (Drafts/ and traceability matrix) to git"
+
+# ── Reviewer-2 (Adversarial Checkpoint) ──────────────
+# The Reviewer gates all final outputs. Customize its
+# constraints for your domain.
+reviewer:
+  enabled: true
+  max_revision_loops: 3
+
+  # Words that trigger automatic rejection
+  banned_words:
+    - "groundbreaking"
+    - "revolutionary"
+    - "game-changing"
+    - "paradigm-shifting"
+    - "unprecedented"
+
+  # Structural elements the output MUST contain
+  required_elements:
+    - "a section that distinguishes high engagement from clinically impairing use"
+    - "a short limitations section"
+    - "in-text citations (e.g., [1], [2])"
+    - "a formal 'References' or 'Reference List' section at the bottom"
+    - "when discussing AI-chatbot or LLM use, a note on the conceptual instability of the construct and whether evidence meets clinical-level impairment criteria"
+    - "when citing a prevalence figure, the name of the screening instrument and the cut-off score used must be stated; prevalence claims without this information must be rejected"
+    - "when gaming disorder or internet gaming disorder is mentioned, explicit clarification of its diagnostic status (ICD-11 recognized vs. DSM-5 Section III research category) is required"
+
+  # Patterns that trigger automatic rejection — output must not imply pathology from
+  # frequency alone.
+  rejection_patterns:
+    - "any claim that frequent or heavy internet use is inherently pathological without evidence of functional impairment"
+
+  # Tone enforcement
+  tone: "strictly factual, objective, and neutral"
+
+  # Optional: use a dedicated model for Reviewer-2 to create adversarial diversity.
+  # Merges on top of the main model config — only override what differs.
+  # Higher temperature (0.7–0.9) makes the reviewer more likely to find flaws.
+  # If omitted, Reviewer-2 uses the same model as the research agents.
+  #
+  # ── Same provider, higher temperature (current setting) ─────────────────
+  # Reviewer-2 uses the same model family as agents (gpt-4o) but at higher
+  # temperature for more adversarial critique. This is the minimal diversity step.
+  model:
+    name: "gpt-4o"
+    temperature: 0.8
+  #
+  # ── Cross-provider adversarial diversity (recommended for stronger review) ─
+  # For maximum adversarial diversity, switch Reviewer-2 to a different model
+  # family entirely. A Claude model reviewing GPT-4o agent output (or vice versa)
+  # brings genuinely different training biases and response patterns to the review.
+  # Uncomment and substitute credentials to enable:
+  #
+  # model:
+  #   provider: "anthropic"
+  #   name: "claude-opus-4-6"
+  #   temperature: 0.8
+  #   env_key: "ANTHROPIC_API_KEY"
+  #
+  # Or with Google Gemini as the adversarial reviewer:
+  # model:
+  #   provider: "google"
+  #   name: "gemini-1.5-pro"
+  #   temperature: 0.8
+  #   env_key: "GOOGLE_API_KEY"
+
+  # Optional: Override the auto-generated reviewer prompt entirely.
+  # Uncomment and edit to use a fully custom reviewer.
+  # custom_prompt: |
+  #   You are a financial compliance reviewer. You read the agent's output.
+  #   If the output contains forward-looking statements without disclaimers,
+  #   or if projections are not clearly labeled as estimates, REJECT it.
+
+# ── Human-in-the-Loop (HITL) Checkpoints ─────────────
+# When enabled, the swarm pauses at configured points and asks the user
+# a focused QC question before continuing. Uses LangGraph interrupt().
+# Set enabled: false for fully autonomous runs (default behaviour).
+#
+# Available checkpoints:
+#   pre_flight      — confirm task scope before the graph starts (CLI prompt, no interrupt)
+#   post_plan       — approve/redirect the orchestrator's first routing decision
+#   pre_journalist  — add final framing instructions before the Journalist writes
+#   on_rejection    — reviewer rejected: choose REVISE / OVERRIDE / custom instructions
+hitl:
+  enabled: false
+  checkpoints:
+    - pre_flight
+    - post_plan
+    - pre_journalist
+    - on_rejection
+
+# ── Epistemic Tags ───────────────────────────────────
+# Tags used to classify knowledge claims in the traceability matrix.
+# Customize these to fit your domain's epistemology.
+epistemic_tags:
+  - "[FACT]"
+  - "[INFERENCE]"
+  - "[SPECULATION]"
+

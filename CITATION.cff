@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+title: "Research Swarm: A Configurable Multi-Agent Research Framework"
+message: >-
+  If you use this software in your research, please cite it using
+  the metadata below.
+type: software
+authors:
+  - given-names: Damien
+    family-names: Huzard
+    alias: dhuzard
+    affiliation: Independent Researcher
+version: 0.2.0
+date-released: "2026-04-09"
+license: MIT
+repository-code: "https://github.com/dhuzard/piu-psych-swarm"
+abstract: >-
+  Research Swarm is a configuration-driven multi-agent research framework
+  built on LangGraph. It deploys an autonomous team of AI specialists
+  (orchestrator, domain experts, journalist, adversarial reviewer) that
+  search databases, synthesise evidence, and produce citable research
+  manuscripts — all customisable through a single YAML file without
+  modifying Python code.
+keywords:
+  - multi-agent systems
+  - large language models
+  - scientific research automation
+  - LangGraph
+  - autonomous agents
+  - systematic review

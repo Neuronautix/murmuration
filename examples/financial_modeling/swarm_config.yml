@@ -1,0 +1,101 @@
+# ═══════════════════════════════════════════════════════
+# swarm_config.yml — Financial Modeling Domain Example
+# ═══════════════════════════════════════════════════════
+# Copy this file to your project root as swarm_config.yml,
+# then customise the persona.md files in agents/*/
+# ═══════════════════════════════════════════════════════
+
+swarm:
+  name: "FinanceSwarm"
+  description: "Multi-agent financial research and risk analysis system"
+  output_dir: "./Drafts"
+  traceability_matrix: "./Knowledge_Traceability_Matrix.md"
+
+orchestrator:
+  agent: "Chief Analyst"
+  journalist: "Report Writer"
+  max_agent_calls: 6
+  max_tool_rounds_per_agent: 4
+
+model:
+  provider: "openai"
+  name: "gpt-4o"
+  temperature: 0.1
+  env_key: "OPENAI_API_KEY"
+
+personas:
+  - name: "Chief Analyst"
+    icon: "📈"
+    role: "Orchestrator & Strategy Lead"
+    persona_file: "./agents/ChiefAnalyst/persona.md"
+    tools: [search_web, search_kb, append_traceability]
+
+  - name: "Quant Researcher"
+    icon: "🧮"
+    role: "Quantitative Analysis & Model Validation"
+    persona_file: "./agents/QuantResearcher/persona.md"
+    tools: [search_web, search_kb, scrape_page]
+
+  - name: "Compliance Officer"
+    icon: "🛡️"
+    role: "Regulatory & Risk Compliance"
+    persona_file: "./agents/ComplianceOfficer/persona.md"
+    tools: [search_web, search_kb]
+
+  - name: "Report Writer"
+    icon: "✍️"
+    role: "Neutral Analyst & Report Assembler"
+    persona_file: "./agents/ReportWriter/persona.md"
+    tools: [write_section, append_traceability]
+
+tools:
+  search_web:
+    module: "automation.tools"
+    function: "search_you_engine"
+    description: "Search for market news, SEC filings, and regulatory updates"
+
+  search_kb:
+    module: "automation.tools"
+    function: "search_knowledge_base"
+    description: "Search local financial reports and internal research"
+
+  scrape_page:
+    module: "automation.tools"
+    function: "scrape_webpage"
+    description: "Fetch full content from SEC EDGAR, central bank pages, etc."
+
+  write_section:
+    module: "automation.tools"
+    function: "write_manuscript_section"
+    description: "Write a section of the financial report to disk"
+
+  append_traceability:
+    module: "automation.tools"
+    function: "append_traceability_matrix"
+    description: "Log a financial finding to the audit trail"
+
+reviewer:
+  enabled: true
+  max_revision_loops: 3
+  banned_words:
+    - "guaranteed returns"
+    - "risk-free"
+    - "sure thing"
+    - "can't lose"
+    - "moon"
+    - "rocket"
+  required_elements:
+    - "data source citations with dates"
+    - "a Risk Disclaimer section"
+  rejection_patterns: []
+  tone: "conservative, hedged financial analysis with appropriate caveats"
+
+hitl:
+  enabled: false
+  checkpoints: []
+
+epistemic_tags:
+  - "[MARKET_DATA]"
+  - "[ESTIMATE]"
+  - "[PROJECTION]"
+  - "[REGULATION]"

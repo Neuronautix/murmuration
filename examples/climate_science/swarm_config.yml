@@ -1,0 +1,105 @@
+# ═══════════════════════════════════════════════════════
+# swarm_config.yml — Climate Science Domain Example
+# ═══════════════════════════════════════════════════════
+# Copy this file to your project root as swarm_config.yml,
+# then customise the persona.md files in agents/*/
+# ═══════════════════════════════════════════════════════
+
+swarm:
+  name: "ClimateSwarm"
+  description: "Multi-agent climate research and policy analysis system"
+  output_dir: "./Drafts"
+  traceability_matrix: "./Knowledge_Traceability_Matrix.md"
+
+orchestrator:
+  agent: "Principal Investigator"
+  journalist: "Technical Writer"
+  max_agent_calls: 6
+  max_tool_rounds_per_agent: 4
+
+model:
+  provider: "openai"
+  name: "gpt-4o"
+  temperature: 0.2
+  env_key: "OPENAI_API_KEY"
+
+personas:
+  - name: "Principal Investigator"
+    icon: "🌍"
+    role: "Orchestrator & Research Director"
+    persona_file: "./agents/PI/persona.md"
+    tools: [search_web, search_literature, search_kb, append_traceability]
+
+  - name: "Data Analyst"
+    icon: "📊"
+    role: "Statistical Modeling & Dataset Expert"
+    persona_file: "./agents/DataAnalyst/persona.md"
+    tools: [search_literature, search_kb, scrape_page]
+
+  - name: "Policy Advisor"
+    icon: "📜"
+    role: "IPCC & Regulatory Framework Expert"
+    persona_file: "./agents/PolicyAdvisor/persona.md"
+    tools: [search_web, search_kb]
+
+  - name: "Technical Writer"
+    icon: "✍️"
+    role: "Observer & Science Communicator"
+    persona_file: "./agents/TechWriter/persona.md"
+    tools: [write_section, append_traceability]
+
+tools:
+  search_literature:
+    module: "automation.tools"
+    function: "search_pubmed"
+    description: "Search PubMed for environmental health and climate literature"
+
+  search_web:
+    module: "automation.tools"
+    function: "search_you_engine"
+    description: "Search the web for IPCC reports, COP outcomes, and climate news"
+
+  search_kb:
+    module: "automation.tools"
+    function: "search_knowledge_base"
+    description: "Search local climate datasets and research papers"
+
+  scrape_page:
+    module: "automation.tools"
+    function: "scrape_webpage"
+    description: "Fetch full content from IPCC pages, NOAA data portals, etc."
+
+  write_section:
+    module: "automation.tools"
+    function: "write_manuscript_section"
+    description: "Write a section of the research paper to disk"
+
+  append_traceability:
+    module: "automation.tools"
+    function: "append_traceability_matrix"
+    description: "Log a climate finding to the evidence trail"
+
+reviewer:
+  enabled: true
+  max_revision_loops: 3
+  banned_words:
+    - "catastrophic"    # unless backed by specific data
+    - "devastating"
+    - "unprecedented"   # overused in climate comms
+    - "alarmist"
+    - "hoax"
+  required_elements:
+    - "DOI-linked citations"
+    - "a Methodology or Data Sources section"
+  rejection_patterns: []
+  tone: "measured, evidence-based scientific analysis"
+
+hitl:
+  enabled: false
+  checkpoints: []
+
+epistemic_tags:
+  - "[OBSERVED]"
+  - "[MODELED]"
+  - "[PROJECTED]"
+  - "[INFERENCE]"
