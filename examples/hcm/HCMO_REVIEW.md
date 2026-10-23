@@ -21,6 +21,8 @@ explicit sensor modality to `tech:hasSensorTechnology`, a software version to
 with the original paper provenance and the pinned HCMO version. A suggestion
 does not assert an ontology instance. Fields without a defensible term mapping
 appear in `hcmo_coverage.json` with a source ID and reason.
+The fixed `0.7` mapping confidence is an uncalibrated review-priority heuristic,
+not a measured probability of semantic correctness or HCMO conformance.
 
 HCMO's `bio:SubjectShape` requires `hasSpecies` **when a Subject instance is
 validated**; its `env:LightCycleShape` does not require phase duration values.

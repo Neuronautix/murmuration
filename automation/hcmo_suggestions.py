@@ -13,6 +13,8 @@ HCMO_VERSION = "0.4.1"
 HCMO_RELEASE_COMMIT = "9503ae4827525d3c82cb0a2cc56a1ce52da39159"
 HCMO_VERSION_IRI = "https://w3id.org/hcmo/ontology/hcm/0.4.1"
 HCMO_SOURCE = {"source_id": "HCMO:0.4.1", "source_type": "other", "uri": HCMO_VERSION_IRI}
+# Fixed review-priority heuristic, not a calibrated probability of mapping correctness.
+HCMO_SUGGESTION_CONFIDENCE = 0.7
 
 # Verified against HCMO v0.4.1 dist/profile.json and the source modules.
 # These are mapping suggestions to existing terms, never instance assertions.
@@ -82,7 +84,7 @@ def suggest_hcmo_mappings(metadata_assertions: list[dict[str, Any]]) -> dict[str
             "target_schema": f"HCMO {HCMO_VERSION}",
             "target_field": iri,
             "mapping_rationale": f"{rationale} Source assertion: {item['assertion_id']}. Version: {HCMO_VERSION_IRI}.",
-            "confidence": 0.7,
+            "confidence": HCMO_SUGGESTION_CONFIDENCE,
         })
     return {
         "ontology": HCMO_VERSION_IRI,
