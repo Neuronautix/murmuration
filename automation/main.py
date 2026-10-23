@@ -72,7 +72,9 @@ from automation.config import (
     load_config,
     validate_env,
 )
+from automation.exporters import export_hcm_mapppp_bundle
 from automation.graph import Command, build_graph  # Command re-exported from graph.py
+from automation.hcm_pilot import run_hcm_pilot
 
 # Load environment configuration (.env)
 load_dotenv()
@@ -91,6 +93,8 @@ review_app = typer.Typer(help="Configure reviewer policy and adversarial checks.
 model_app = typer.Typer(help="Configure model provider, model name, and env key.")
 metadata_app = typer.Typer(help="Configure swarm metadata, output paths, and epistemic tags.")
 tools_app = typer.Typer(help="Curate the active tool registry for the current swarm.")
+export_app = typer.Typer(help="Export scientific proposal bundles.")
+pilot_app = typer.Typer(help="Run deterministic domain pilots.")
 app.add_typer(blueprint_app, name="blueprint")
 app.add_typer(persona_app, name="persona")
 app.add_typer(team_app, name="team")
@@ -98,6 +102,8 @@ app.add_typer(review_app, name="review")
 app.add_typer(model_app, name="model")
 app.add_typer(metadata_app, name="metadata")
 app.add_typer(tools_app, name="tools")
+app.add_typer(export_app, name="export")
+app.add_typer(pilot_app, name="pilot")
 
 # ── Report-mode templates ─────────────────────────────────────────────────
 REPORT_MODES = {
@@ -1275,6 +1281,48 @@ def info():
     typer.secho(f"   Tone: {reviewer.get('tone', 'neutral')}")
 
     typer.echo()
+
+
+@export_app.command("mapppp-hcm")
+def export_mapppp_hcm(
+    draft_path: Path = typer.Option(..., "--draft-path"),
+    traceability_matrix: Path = typer.Option(..., "--traceability-matrix"),
+    config_path: Path = typer.Option(Path("examples/hcm/swarm_config.yml"), "--config-path"),
+    output: Path = typer.Option(Path("Drafts/HCMSAS/mapppp_bundle.json"), "--output"),
+    review_notes_path: Path | None = typer.Option(None, "--review-notes-path"),
+    registry_path: Path | None = typer.Option(None, "--registry-path"),
+):
+    """Package HCM draft evidence as proposal-only MAPPPP 0.1.0."""
+    try:
+        bundle = export_hcm_mapppp_bundle(
+            config_path=config_path, draft_path=draft_path,
+            traceability_matrix_path=traceability_matrix,
+            review_notes_path=review_notes_path, registry_path=registry_path,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"EXPORT ERROR: {error}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from error
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(bundle.model_dump_json(indent=2, exclude_none=True), encoding="utf-8")
+    typer.echo(str(output))
+
+
+@pilot_app.command("hcm")
+def pilot_hcm(
+    spec_path: Path = typer.Option(Path("tests/fixtures/hcm_circadian_mouse_demo.yaml"), "--spec-path"),
+    output_root: Path | None = typer.Option(None, "--output-root"),
+    refresh_cache: bool = typer.Option(False, "--refresh-cache"),
+    refresh_intermediates: bool = typer.Option(False, "--refresh-intermediates"),
+):
+    """Run the fixed PMID HCM pilot with resumable intermediates."""
+    try:
+        outputs = run_hcm_pilot(spec_path, output_root,
+                                refresh_cache=refresh_cache,
+                                refresh_intermediates=refresh_intermediates)
+    except (FileNotFoundError, ValueError) as error:
+        typer.secho(f"PILOT ERROR: {error}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from error
+    typer.echo(str(outputs["bundle"]))
 
 
 if __name__ == "__main__":
