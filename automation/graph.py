@@ -50,25 +50,24 @@ Human-in-the-Loop (HITL)
   the user, and resumes with Command(resume=answer).
 """
 
-import asyncio
 from typing import Annotated, TypedDict
 
-from pydantic import BaseModel
-from langgraph.graph import StateGraph, END, START
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
-from langgraph.types import Send, interrupt, Command  # noqa: F401 (Command re-exported for main.py)
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.prebuilt import ToolNode
+from langgraph.types import Command, Send, interrupt  # noqa: F401 (Command re-exported for main.py)
+from pydantic import BaseModel
 
 from automation.config import (
-    load_config,
+    build_agent_system_prompt,
+    build_reviewer_prompt,
     create_model,
     create_reviewer_model,
-    build_reviewer_prompt,
-    get_persona_config,
-    load_tools_for_persona,
-    build_agent_system_prompt,
     get_hitl_config,
+    get_persona_config,
+    load_config,
+    load_tools_for_persona,
 )
 
 # Characters retained from each peer agent's output when shown to another
@@ -232,7 +231,8 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
     nexus_cfg = get_persona_config(config, config["orchestrator"]["agent"])
     system_prompt = build_agent_system_prompt(nexus_cfg)
     max_calls = config["orchestrator"].get("max_agent_calls", 8)
-    valid_targets = set(specialist_names) | {"Journalist", "END"}
+    journalist_name = config["orchestrator"]["journalist"]
+    valid_targets = set(specialist_names) | {journalist_name, "Journalist", "END"}
     specialist_set = set(specialist_names)
 
     hitl_on = hitl_cfg.get("enabled", False)
@@ -287,7 +287,8 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
         ])
         round_usage = _extract_token_usage(decision)
 
-        valid_next = [t for t in decision.next_agents if t in valid_targets]
+        valid_next = ["Journalist" if t == journalist_name else t
+                      for t in decision.next_agents if t in valid_targets]
         if not valid_next:
             valid_next = ["Journalist"]
 

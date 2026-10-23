@@ -66,7 +66,7 @@ epistemic_tags:
 def config_file(tmp_path):
     """Write a minimal valid swarm_config.yml to a temp directory."""
     cfg = tmp_path / "swarm_config.yml"
-    cfg.write_text(MINIMAL_CONFIG)
+    cfg.write_text(MINIMAL_CONFIG, encoding="utf-8")
     return tmp_path
 
 
