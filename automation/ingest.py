@@ -1,14 +1,14 @@
 import os
-from typing import List
 from pathlib import Path
+from typing import List
 
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from rich.console import Console
 
 try:
-    from langchain_huggingface import HuggingFaceEmbeddings as SentenceTransformerEmbeddings
     from langchain_chroma import Chroma
+    from langchain_huggingface import HuggingFaceEmbeddings as SentenceTransformerEmbeddings
 except ImportError:
     from langchain_community.embeddings import SentenceTransformerEmbeddings  # type: ignore[no-redef]
     from langchain_community.vectorstores import Chroma  # type: ignore[no-redef]
@@ -71,10 +71,10 @@ def ingest_agent_kb(agent_name: str):
     splits = text_splitter.split_documents(docs)
 
     embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-    
+
     # Create/Update vector db for specific agent
     persist_directory = os.path.join(DB_DIR, agent_name)
-    
+
     Chroma.from_documents(
         documents=splits,
         embedding=embedding_function,

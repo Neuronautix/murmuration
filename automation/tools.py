@@ -26,11 +26,9 @@ import os
 import re
 import subprocess
 from pathlib import Path
+
 import requests
 from langchain_core.tools import tool
-
-
-
 
 # ═══════════════════════════════════════════════════════
 # RESEARCH TOOLS (Domain-Specific — swap these per domain)
@@ -534,7 +532,6 @@ def write_manuscript_section(section_name: str, content: str) -> str:
     in a run, a version counter suffix (_v2, _v3, …) is appended if a file with
     the base name already exists.
     """
-    import datetime
 
     from automation.config import resolve_swarm_path
 
@@ -1002,8 +999,8 @@ def search_knowledge_base(query: str, agent_name: str = "all", top_k: int = 5) -
     """
     try:
         try:
-            from langchain_huggingface import HuggingFaceEmbeddings as SentenceTransformerEmbeddings
             from langchain_chroma import Chroma
+            from langchain_huggingface import HuggingFaceEmbeddings as SentenceTransformerEmbeddings
         except ImportError:
             from langchain_community.embeddings import SentenceTransformerEmbeddings
             from langchain_community.vectorstores import Chroma
