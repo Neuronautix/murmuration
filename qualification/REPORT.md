@@ -22,9 +22,9 @@ explicit UTF-8 fixture writes passed all 9 original tests. No test was skipped.
 
 | Gate | Result |
 |---|---|
-| METODAX suite under compatible pinned LangChain versions | 23 passed |
+| METODAX suite under compatible pinned LangChain versions | 29 passed after HCMO refinement |
 | Ruff on changed Python files | Passed |
-| Clean virtual environment, OntoHistoCurator pinned at `c426705` | 5 passed; one dependency deprecation warning |
+| Clean virtual environment, OntoHistoCurator pinned at `c426705` | 6 passed after HCMO refinement |
 | Real MAPPPP 0.1.0 validator on generated pilot and exporter bundles | Passed |
 | Native ingestion / proposal-only staging / no graph promotion | Passed |
 | Repeated identical export and ingestion | Passed, identical payload and staged record |
@@ -45,3 +45,12 @@ unmerged OntoHistoCurator branch commit, so they do not establish the same
 immutable-ID behavior for `main` at `199ef02`.
 
 Neither donor repository was modified or archived. No PR was merged.
+
+## HCMO semantic refinement
+
+HCMO v0.4.1 was inspected at tag commit `9503ae4827525d3c82cb0a2cc56a1ce52da39159`.
+The pilot now separates source-linked extraction from optional term suggestions
+and no longer emits abstract-derived graph triples or synthetic missingness
+assertions. Six qualification tests include real MAPPPP validation of optional
+HCMO suggestions and a pilot-report-to-exporter round trip. The exact concept
+and constraint comparison is in `examples/hcm/HCMO_REVIEW.md`.

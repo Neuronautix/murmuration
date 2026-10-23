@@ -210,10 +210,11 @@ reviewer:
     - "in-text citations (e.g., [1], [2])"
     - "a formal 'References' section at the bottom"
     - "when sleep or rest is discussed, an explicit statement of whether the measure is EEG-confirmed sleep or an immobility-based proxy"
-    - "a MNMS mapping table classifying each metadata field as: MNMS_core, recommended_non-core, extension_candidate, ambiguous, or missing_in_source"
-    - "a missing metadata report that lists absent MNMS_core fields as a scientific finding"
+    - "a metadata evidence table that distinguishes reported values from fields not detected in the available text"
+    - "an optional HCMO term-suggestion section using only verified v0.4.1 IRIs, with unresolved mappings listed for review"
+    - "an explicit statement that abstract-level missingness is not a SHACL or standards compliance decision"
     - "when a behavioral metric is mapped to a translational or psychiatric construct, explicit citation of the studies that justify the analogy"
-    - "a knowledge graph schema section with entity types, relation types, and provenance fields"
+    - "a candidate graph section with provenance fields; do not mint ontology relations from abstract-only text"
     - "a reproducibility and comparability risk section with severity classification"
 
   rejection_patterns:
@@ -276,36 +277,3 @@ mnms_categories:
   - behavioral_endpoints
   - preprocessing_and_QC
   - provenance_and_versioning
-
-# ── Knowledge Graph Entity Types ─────────────────────
-# Reference vocabulary for the Knowledge Graph Engineer.
-kg_entity_types:
-  - Study
-  - Cohort
-  - Animal
-  - Cage
-  - HCM_System
-  - Sensor
-  - Software_Classifier
-  - Behavior
-  - Endpoint
-  - Intervention
-  - Environmental_Factor
-  - Husbandry_Event
-  - Time_Window
-  - Evidence_Source
-
-# ── Knowledge Graph Relation Types ───────────────────
-kg_relation_types:
-  - uses_system
-  - housed_in
-  - measured_by
-  - classified_by
-  - observed_during
-  - affected_by
-  - associated_with
-  - confounded_by
-  - supported_by_source
-  - is_proxy_for
-  - defined_as
-

@@ -56,6 +56,13 @@ def test_pilot_native_validation_staging_retry_and_no_promotion(tmp_path, monkey
     assert list(ingest.stores.settings.graphs_dir.rglob("*")) == []
     retry = run_hcm_pilot(FIXTURES / "hcm_circadian_mouse_demo.yaml", tmp_path / "pilot")
     assert retry["bundle"].read_bytes() == outputs["bundle"].read_bytes()
+    optional = run_hcm_pilot(FIXTURES / "hcm_circadian_mouse_demo.yaml", tmp_path / "pilot",
+                             suggest_hcmo=True)
+    suggested = validate_bundle(optional["bundle"].read_bytes())
+    assert all(item.status == "proposed" for item in suggested.mapping_assertions)
+    assert ingest.ingest_mapppp_bundle_file(optional["bundle"])["workflow_state"] == "staged"
+    assert ingest.stores.accepted.list_all() == []
+    assert list(ingest.stores.settings.graphs_dir.rglob("*")) == []
 
 
 def test_distinct_same_second_and_immutable_conflict(tmp_path):
@@ -136,4 +143,23 @@ def test_actual_producer_content_matches_frozen_sas_fixture(tmp_path):
             for item in bundle[family]:
                 item["provenance"].pop("source_id", None)
                 item["provenance"].pop("source_anchor", None)
+                if family == "mapping_assertions":
+                    item.pop("confidence", None)
     assert actual == donor
+
+
+def test_pilot_report_export_keeps_pmid_anchors_and_mapppp_contract(tmp_path, monkeypatch):
+    outputs, _ = generated(tmp_path, monkeypatch)
+    exported = export_hcm_mapppp_bundle(
+        ROOT / "examples/hcm/swarm_config.yml", outputs["draft"], outputs["traceability_matrix"],
+        suggest_hcmo=True, coverage_path=tmp_path / "coverage.json",
+    )
+    normalized = validate_bundle(exported.model_dump(mode="json", exclude_none=True)).normalized()
+    assert normalized["package_metadata"]["contract_version"] == "0.1.0"
+    assert all(item["status"] == "proposed" for item in normalized["mapping_assertions"])
+    assert all(item["provenance"]["source_id"].startswith("PMID:")
+               for item in normalized["evidence_assertions"]
+               if item["assertion_id"].startswith("evidence-table-"))
+    assert {item["provenance"]["source_id"] for item in normalized["evidence_assertions"]} <= {
+        "seed_corpus", *(f"PMID:{pmid}" for pmid in ("39880968", "39371613", "39763604", "39296476", "39534023"))}
+    assert (tmp_path / "coverage.json").exists()

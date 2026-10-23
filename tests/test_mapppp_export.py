@@ -285,6 +285,8 @@ def test_export_hcm_mapppp_bundle_matches_checked_in_pilot_baseline_fixture(tmp_
             for assertion in item[family]:
                 assertion["provenance"].pop("source_id", None)
                 assertion["provenance"].pop("source_anchor", None)
+                if family == "mapping_assertions":
+                    assertion.pop("confidence", None)
     assert payload == expected
 
 
@@ -343,3 +345,19 @@ def test_export_mapppp_hcm_cli_writes_canonical_bundle_json(tmp_path: Path):
     assert payload["review_notes"][-1]["disposition"] == "request_changes"
     assert set(payload["metadata_assertions"][0]["provenance"]) == {"source_id", "source_anchor", "proposed_by", "created_at"}
     assert "source_anchors" not in payload["metadata_assertions"][0]["provenance"]
+
+
+def test_exporter_opt_in_hcmo_suggestion_has_source_anchor_and_coverage(tmp_path: Path):
+    config, matrix, draft, notes = _write_hcm_fixture_files(tmp_path)
+    draft.write_text(draft.read_text(encoding="utf-8").replace(
+        "Reported as C57BL/6J mice [1].", "[FACT] Reported as C57BL/6J mice [1]."),
+        encoding="utf-8")
+    coverage_path = tmp_path / "hcmo_coverage.json"
+    bundle = export_hcm_mapppp_bundle(config, draft, matrix, notes, suggest_hcmo=True,
+                                      coverage_path=coverage_path)
+    suggestions = [item for item in bundle.mapping_assertions if item.target_schema == "HCMO 0.4.1"]
+    assert any(item.local_field == "species" for item in suggestions)
+    assert all(item.provenance.source_id.startswith("DOI:") and item.provenance.source_anchor
+               for item in suggestions)
+    assert any(source["source_id"] == "HCMO:0.4.1" for source in bundle.sources)
+    assert json.loads(coverage_path.read_text(encoding="utf-8"))["gaps"]

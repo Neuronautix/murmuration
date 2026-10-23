@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from automation.exporters.identity import SourceRegistry
 from automation.exporters.identity import package_id as content_package_id
+from automation.hcmo_suggestions import HCMO_SOURCE, suggest_hcmo_mappings
 
 _CITATION_RE = re.compile(r"\[(\d+)\]")
 _SECTION_RE = re.compile(r"^\s{0,3}(?:##|#)\s+([A-I])\.\s+(.+?)\s*$", re.MULTILINE)
@@ -284,26 +285,6 @@ def _provenance(
     )
 
 
-def _infer_species(config: dict[str, Any], draft_text: str) -> str | None:
-    swarm = config.get("swarm", {})
-    text_blob = " ".join(
-        [
-            swarm.get("name", ""),
-            swarm.get("description", ""),
-            draft_text or "",
-            json.dumps(config.get("personas", [])),
-        ]
-    ).lower()
-
-    if re.search(r"\b(mice|mouse|murine|c57bl/6)\b", text_blob):
-        return "mouse"
-    if re.search(r"\b(rats|rat)\b", text_blob):
-        return "rat"
-    if re.search(r"\brodent(s)?\b", text_blob):
-        return "rodent"
-    return None
-
-
 def _load_traceability_rows(traceability_matrix_path: Path) -> list[dict[str, str]]:
     text = traceability_matrix_path.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -354,15 +335,8 @@ def _load_review_note_payload(review_notes_path: Path | None) -> list[dict[str, 
 
 
 def _mapping_confidence(classification: str | None, value_or_status: str | None) -> float:
-    classification_key = (classification or "").strip().lower()
-    value_key = (value_or_status or "").strip().lower()
-    if classification_key == "mnms_core":
-        return 0.95
-    if classification_key in {"recommended", "extension_candidate"}:
-        return 0.8
-    if classification_key == "missing_in_source" or value_key == "missing":
-        return 0.55
-    return 0.7
+    # A named category or a missing value is not evidence of semantic fit.
+    return 0.5
 
 
 def _metadata_gap_field_and_value(text: str) -> tuple[str, str]:
@@ -436,6 +410,8 @@ def export_hcm_mapppp_bundle(
     review_notes_path: str | Path | None = None,
     exported_at: datetime | None = None,
     registry_path: str | Path | None = None,
+    suggest_hcmo: bool = False,
+    coverage_path: str | Path | None = None,
 ) -> MAPPPPBundle:
     """Build a canonical MAPPPP v0.1.0 bundle from existing HCM swarm artifacts."""
     config_path = Path(config_path)
@@ -514,7 +490,8 @@ def export_hcm_mapppp_bundle(
                 continue
             notes = row.get("notes") or row.get("method") or ""
             citations = _extract_citations(" ".join([statement, notes]))
-            source_id = row.get("source_anchor") or row.get("source") or row.get("doi")
+            source_id = (row.get("source_anchor") or row.get("source") or
+                         row.get("source_id") or row.get("stable_source_id") or row.get("doi"))
             cleaned_statement = _strip_epistemic_and_citations(statement)
             evidence_assertions.append(
                 EvidenceAssertion(
@@ -542,44 +519,52 @@ def export_hcm_mapppp_bundle(
                 if (row.get("value_or_status") or "").strip().lower() == "missing"
                 else _first_epistemic_label(notes)
             )
-            mapping_assertions.append(
-                MappingAssertion(
-                    assertion_id=f"mapping-assertion-{index}-{row_index}",
-                    local_field=_slugify(row.get("metadata_field", "")),
-                    target_schema="MNMS",
-                    target_field=_slugify(row.get("mnms_category", "")),
-                    mapping_rationale=" ".join(
-                        part for part in [row.get("classification"), _strip_epistemic_and_citations(notes)] if part
-                    ),
-                    confidence=_mapping_confidence(row.get("classification"), row.get("value_or_status")),
-                    epistemic_label=epistemic_label,
-                    provenance=_provenance(
-                        row.get("source"),
-                        citations,
-                        references,
-                        proposed_by=HCM_METADATA_PERSONA,
-                        created_at=exported_at_iso,
-                    ),
+            target_schema = row.get("target_schema") or "MNMS"
+            target_field = row.get("target_field") or _slugify(row.get("mnms_category", ""))
+            if target_field:
+                mapping_assertions.append(
+                    MappingAssertion(
+                        assertion_id=f"mapping-assertion-{index}-{row_index}",
+                        local_field=_slugify(row.get("metadata_field", "")),
+                        target_schema=target_schema,
+                        target_field=target_field,
+                        mapping_rationale=" ".join(part for part in [
+                            row.get("classification"), row.get("rationale"),
+                            _strip_epistemic_and_citations(notes),
+                        ] if part) or "Candidate mapping; source and term review required",
+                        confidence=_mapping_confidence(row.get("classification"), row.get("value_or_status")),
+                        epistemic_label=epistemic_label,
+                        provenance=_provenance(
+                            row.get("source") or row.get("source_id"),
+                            citations,
+                            references,
+                            proposed_by=HCM_METADATA_PERSONA,
+                            created_at=exported_at_iso,
+                        ),
+                    )
                 )
-            )
-            metadata_assertions.append(
-                MetadataAssertion(
-                    assertion_id=f"mapping-metadata-{index}-{row_index}",
-                    field=_slugify(row.get("metadata_field", "")),
-                    value=str(row.get("value_or_status") or ""),
-                    epistemic_label=epistemic_label,
-                    provenance=_provenance(
-                        row.get("source"),
-                        citations,
-                        references,
-                        proposed_by=HCM_METADATA_PERSONA,
-                        created_at=exported_at_iso,
-                    ),
+            if row.get("value_or_status"):
+                metadata_assertions.append(
+                    MetadataAssertion(
+                        assertion_id=f"mapping-metadata-{index}-{row_index}",
+                        field=_slugify(row.get("metadata_field", "")),
+                        value=str(row["value_or_status"]),
+                        epistemic_label=epistemic_label,
+                        provenance=_provenance(
+                            row.get("source") or row.get("source_id"),
+                            citations,
+                            references,
+                            proposed_by=HCM_METADATA_PERSONA,
+                            created_at=exported_at_iso,
+                        ),
+                    )
                 )
-            )
 
     for index, bullet in enumerate(_extract_bullets(sections.get("E", "")), start=1):
+        if not any(tag in bullet for tag in ("[MISSING]", "[CONTESTED]", "[MISSING SOURCE]")):
+            continue
         citations = _extract_citations(bullet)
+        pmid_anchor = re.search(r"\bPMID:\d+\b", bullet)
         field, value = _metadata_gap_field_and_value(bullet)
         metadata_assertions.append(
             MetadataAssertion(
@@ -588,7 +573,7 @@ def export_hcm_mapppp_bundle(
                 value=value,
                 epistemic_label=_first_epistemic_label(bullet),
                 provenance=_provenance(
-                    None,
+                    pmid_anchor.group(0) if pmid_anchor else None,
                     citations,
                     references,
                     proposed_by=HCM_METADATA_PERSONA,
@@ -683,9 +668,18 @@ def export_hcm_mapppp_bundle(
             )
         )
 
-    study_context = StudyContext(species=_infer_species(config, draft_text))
-    if study_context.species is None:
-        study_context = None
+    coverage = None
+    if suggest_hcmo:
+        coverage = suggest_hcmo_mappings([item.model_dump(mode="json") for item in metadata_assertions])
+        mapping_assertions.extend(MappingAssertion.model_validate(item) for item in coverage["mappings"])
+    reported_species = set()
+    for item in metadata_assertions:
+        if item.field != "species" or item.provenance.source_id == references.report_id:
+            continue
+        match = re.fullmatch(r"(?:species:\s*)?(mouse|mice|rat|rats)", str(item.value).strip(), re.I)
+        if match:
+            reported_species.add({"mice": "mouse", "rats": "rat"}.get(match.group(1).lower(), match.group(1).lower()))
+    study_context = StudyContext(species=next(iter(reported_species))) if len(reported_species) == 1 else None
 
     bundle = MAPPPPBundle(
         package_metadata=PackageMetadata(
@@ -694,7 +688,8 @@ def export_hcm_mapppp_bundle(
             created_by="automation.exporters.mapppp.export_hcm_mapppp_bundle",
         ),
         study_context=study_context,
-        sources=sorted(references.sources.values(), key=lambda source: source["source_id"]),
+        sources=sorted([*references.sources.values(), *([HCMO_SOURCE] if suggest_hcmo else [])],
+                       key=lambda source: source["source_id"]),
         metadata_assertions=metadata_assertions,
         evidence_assertions=evidence_assertions,
         mapping_assertions=mapping_assertions,
@@ -710,4 +705,8 @@ def export_hcm_mapppp_bundle(
         for item in family:
             item.provenance.created_at = stable_created_at
     references.save()
+    if coverage_path and coverage:
+        target = Path(coverage_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(coverage, indent=2), encoding="utf-8")
     return bundle

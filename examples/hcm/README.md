@@ -36,3 +36,13 @@ fields. OntoHistoCurator owns MAPPPP validation, schema, staging, and promotion.
 
 The producer and pilot logic are adapted from the same donor commit listed
 above. Frozen donor fixtures remain in `tests/fixtures` for comparison.
+
+## HCMO term suggestions
+
+HCMO v0.4.1 is the semantic reference for this pack. The [quality-pass
+comparison](HCMO_REVIEW.md) records the verified terms, relevant constraints,
+and coverage gaps. Extraction remains deterministic and source-linked. Pass
+`--suggest-hcmo` to `pilot hcm` or `export mapppp-hcm` to add a small set of
+version-pinned `proposed` term mappings. The pilot always writes
+`hcmo_coverage.json`; the exporter writes a coverage sidecar when suggestions
+are requested. Neither command declares SHACL or MNMS compliance.
