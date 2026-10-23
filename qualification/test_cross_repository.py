@@ -58,12 +58,17 @@ def test_pilot_native_validation_staging_retry_and_no_promotion(tmp_path, monkey
     assert retry["bundle"].read_bytes() == outputs["bundle"].read_bytes()
 
 
-def test_distinct_same_second_and_immutable_conflict(tmp_path, monkeypatch):
-    _, first = generated(tmp_path, monkeypatch)
-    second = deepcopy(first)
-    second["evidence_assertions"][0]["value"] = "Changed scientific observation"
-    from automation.exporters.identity import package_id
-    second["package_metadata"]["package_id"] = package_id(second, "hcm_circadian_mouse_demo")
+def test_distinct_same_second_and_immutable_conflict(tmp_path):
+    config, matrix, draft, notes = _write_hcm_fixture_files(tmp_path)
+    kwargs = dict(config_path=config, draft_path=draft, traceability_matrix_path=matrix,
+                  review_notes_path=notes, exported_at=datetime(2026, 4, 10, tzinfo=timezone.utc))
+    first = export_hcm_mapppp_bundle(**kwargs).model_dump(mode="json", exclude_none=True)
+    draft.write_text(draft.read_text(encoding="utf-8").replace(
+        "Light cycle transition timing was not reported", "Light cycle and temperature were not reported"),
+        encoding="utf-8")
+    second = export_hcm_mapppp_bundle(**kwargs).model_dump(mode="json", exclude_none=True)
+    validate_bundle(first)
+    validate_bundle(second)
     assert first["package_metadata"]["created_at"] == second["package_metadata"]["created_at"]
     assert first["package_metadata"]["package_id"] != second["package_metadata"]["package_id"]
     ingest = workflow(tmp_path)

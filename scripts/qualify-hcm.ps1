@@ -7,9 +7,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $pythonExe = Join-Path $venv "Scripts/python.exe"
 & $pythonExe -m pip install -r (Join-Path $root "constraints/ontohistoria-qualification.txt")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $pythonExe -m pip install pytest
+& $pythonExe -m pip install -r (Join-Path $root "constraints/test-langchain.txt")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $pythonExe -m pip install --no-deps -e $root
+& $pythonExe -m pip install pytest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Push-Location $root
 try {
