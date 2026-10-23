@@ -36,8 +36,9 @@ explicit UTF-8 fixture writes passed all 9 original tests. No test was skipped.
 
 ## Donor archival decision: NO-GO
 
-Keep both donor repositories active until the three METODAX PRs are reviewed
-and merged, OntoHistoCurator's immutable-ingest commit is available on its
+Keep both donor repositories active until the four METODAX PRs are reviewed
+and merged, the integrated `main` CI (including cross-repository qualification)
+passes, OntoHistoCurator's immutable-ingest commit is available on its
 default branch or in a release, and the source/licence record for SAS is
 resolved. The SAS donor commit has no license file; METODAX records attribution
 but this report does not infer a licence grant. The qualification tests use the
@@ -54,3 +55,14 @@ and no longer emits abstract-derived graph triples or synthetic missingness
 assertions. Six qualification tests include real MAPPPP validation of optional
 HCMO suggestions and a pilot-report-to-exporter round trip. The exact concept
 and constraint comparison is in `examples/hcm/HCMO_REVIEW.md`.
+
+## Integration gate update — 2026-10-23
+
+PR #1's GitHub CI passed Python 3.10, 3.11, and 3.12 after all Ruff findings
+were fixed. PR #2's three matrix jobs also passed. PR #3 adds a pinned
+OntoHistoCurator qualification job to the same workflow, which also runs on
+pushes to `main`. Because OntoHistoCurator is private, that job requires a
+read-only `ONTOHISTOCURATOR_READ_TOKEN` Actions secret in METODAX; it fails
+at the explicit credential check until the secret is configured. All six
+qualification tests passed locally against the pinned commit. No PR or donor
+repository has been merged or archived.
