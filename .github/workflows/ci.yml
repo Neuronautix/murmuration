@@ -34,3 +34,39 @@ jobs:
         continue-on-error: true  # doctor requires persona files; may warn on CI
         env:
           OPENAI_API_KEY: "sk-placeholder-not-needed-for-doctor"
+
+  mapppp-qualification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Require read access to pinned OntoHistoCurator
+        env:
+          ONTOHISTOCURATOR_READ_TOKEN: ${{ secrets.ONTOHISTOCURATOR_READ_TOKEN }}
+        run: |
+          if [ -z "$ONTOHISTOCURATOR_READ_TOKEN" ]; then
+            echo "::error::Set ONTOHISTOCURATOR_READ_TOKEN with read access to Neuronautix/OntoHistoCurator."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Neuronautix/OntoHistoCurator
+          ref: c426705611df098256c15416ae07f084191c395e
+          path: external/ontohistocurator
+          token: ${{ secrets.ONTOHISTOCURATOR_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Install METODAX and pinned validator
+        run: |
+          test "$(git -C external/ontohistocurator rev-parse HEAD)" = c426705611df098256c15416ae07f084191c395e
+          python -m pip install -e ".[dev]"
+          python -m pip install ./external/ontohistocurator
+
+      - name: Run cross-repository qualification
+        run: python -m pytest qualification/ -q
