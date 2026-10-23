@@ -11,8 +11,8 @@ A user should NEVER need to edit this file. All customization flows
 through swarm_config.yml and agents/*/persona.md files.
 """
 
-import os
 import importlib
+import os
 from pathlib import Path
 from typing import Any
 

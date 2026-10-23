@@ -4,11 +4,8 @@ Tests for automation/config.py
 These tests use temporary YAML files and do not require API keys.
 """
 
-import pytest
-import tempfile
-import os
-from pathlib import Path
 
+import pytest
 
 MINIMAL_CONFIG = """
 swarm:

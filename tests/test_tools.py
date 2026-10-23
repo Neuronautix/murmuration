@@ -4,8 +4,7 @@ Tests for automation/tools.py
 All external API calls are mocked — these tests do not require API keys.
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 
 def test_search_pubmed_returns_string():
