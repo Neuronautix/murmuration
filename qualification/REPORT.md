@@ -61,8 +61,11 @@ and constraint comparison is in `examples/hcm/HCMO_REVIEW.md`.
 PR #1's GitHub CI passed Python 3.10, 3.11, and 3.12 after all Ruff findings
 were fixed. PR #2's three matrix jobs also passed. PR #3 adds a pinned
 OntoHistoCurator qualification job to the same workflow, which also runs on
-pushes to `main`. Because OntoHistoCurator is private, that job requires a
-read-only `ONTOHISTOCURATOR_READ_TOKEN` Actions secret in METODAX; it fails
-at the explicit credential check until the secret is configured. All six
+pushes to `main`. Because OntoHistoCurator is private and its organization
+disables deploy keys, that job requires a GitHub App installed for that
+repository with `contents: read`, plus the
+`ONTOHISTOCURATOR_READ_APP_CLIENT_ID` METODAX variable and
+`ONTOHISTOCURATOR_READ_APP_PRIVATE_KEY` Actions secret. It fails at the
+explicit credential check until these are configured. All six
 qualification tests passed locally against the pinned commit. No PR or donor
 repository has been merged or archived.
