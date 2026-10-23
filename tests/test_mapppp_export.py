@@ -2,10 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from typer.testing import CliRunner
-
 from automation.exporters.mapppp import HCM_METADATA_PERSONA, export_hcm_mapppp_bundle
-from automation.main import app
 
 
 def _collect_keys(value):
@@ -310,6 +307,9 @@ def test_export_hcm_mapppp_bundle_raises_for_missing_explicit_review_notes_path(
 
 
 def test_export_mapppp_hcm_cli_writes_canonical_bundle_json(tmp_path: Path):
+    from typer.testing import CliRunner
+
+    from automation.main import app
     config_path, matrix_path, draft_path, notes_path = _write_hcm_fixture_files(tmp_path)
     output_path = tmp_path / "mapppp_bundle.json"
 
