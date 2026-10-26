@@ -36,6 +36,12 @@ jobs:
           OPENAI_API_KEY: "sk-placeholder-not-needed-for-doctor"
 
   mapppp-qualification:
+    # OntoHistoCurator is private (AGPL-3.0). Ecosystem rule: no GitHub App and no
+    # secret for it in this public repository. CI therefore never checks it out;
+    # cross-repository qualification is run manually and offline against a pinned
+    # commit (see qualification/README.md). This job only proves the qualification
+    # module is reported as skipped/UNVERIFIED, never failed and never passed.
+    name: mapppp-qualification (manual; UNVERIFIED in CI)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,38 +51,31 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Require read-only GitHub App credentials
-        env:
-          APP_CLIENT_ID: ${{ vars.ONTOHISTOCURATOR_READ_APP_CLIENT_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.ONTOHISTOCURATOR_READ_APP_PRIVATE_KEY }}
+      - name: Install package with dev dependencies (no OntoHistoCurator)
         run: |
-          if [ -z "$APP_CLIENT_ID" ] || [ -z "$APP_PRIVATE_KEY" ]; then
-            echo "::error::Configure ONTOHISTOCURATOR_READ_APP_CLIENT_ID and ONTOHISTOCURATOR_READ_APP_PRIVATE_KEY for a contents:read GitHub App installed on Neuronautix/OntoHistoCurator."
+          python -m pip install -e ".[dev]" -c constraints/test-langchain.txt
+          if python -c "import ontohistoria" 2>/dev/null; then
+            echo "::error::ontohistoria is importable in CI; it must only live in the manual qualification environment."
             exit 1
           fi
 
-      - uses: actions/create-github-app-token@v3
-        id: ohc-token
-        with:
-          client-id: ${{ vars.ONTOHISTOCURATOR_READ_APP_CLIENT_ID }}
-          private-key: ${{ secrets.ONTOHISTOCURATOR_READ_APP_PRIVATE_KEY }}
-          owner: Neuronautix
-          repositories: OntoHistoCurator
-          permission-contents: read
-
-      - uses: actions/checkout@v4
-        with:
-          repository: Neuronautix/OntoHistoCurator
-          ref: c426705611df098256c15416ae07f084191c395e
-          path: external/ontohistocurator
-          token: ${{ steps.ohc-token.outputs.token }}
-          persist-credentials: false
-
-      - name: Install METODAX and pinned validator
+      - name: Collect qualification (expected skipped as UNVERIFIED)
         run: |
-          test "$(git -C external/ontohistocurator rev-parse HEAD)" = c426705611df098256c15416ae07f084191c395e
-          python -m pip install -e ".[dev]"
-          python -m pip install ./external/ontohistocurator
-
-      - name: Run cross-repository qualification
-        run: python -m pytest qualification/ -q
+          set +e
+          python -m pytest qualification/ -q -rs --junitxml=qualification-junit.xml
+          status=$?
+          set -e
+          # pytest exit code 5 = no tests collected/run (module-level skip).
+          if [ "$status" -ne 0 ] && [ "$status" -ne 5 ]; then exit "$status"; fi
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          suite = ET.parse("qualification-junit.xml").getroot()
+          suite = suite if suite.tag == "testsuite" else suite.find("testsuite")
+          tests, skipped = int(suite.get("tests", 0)), int(suite.get("skipped", 0))
+          failures = int(suite.get("failures", 0)) + int(suite.get("errors", 0))
+          assert failures == 0, f"{failures} qualification failures/errors"
+          assert tests == skipped, f"{tests - skipped} qualification tests ran in CI; expected all skipped"
+          PY
+          msg="OntoHistoCurator cross-repository qualification: UNVERIFIED in CI (private repo not checked out). Run scripts/qualify-hcm.ps1 or scripts/qualify-hcm.sh locally; see qualification/README.md."
+          echo "::warning title=Qualification UNVERIFIED::$msg"
+          echo "### $msg" >> "$GITHUB_STEP_SUMMARY"

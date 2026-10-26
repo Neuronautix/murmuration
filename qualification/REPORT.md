@@ -45,3 +45,13 @@ unmerged OntoHistoCurator branch commit, so they do not establish the same
 immutable-ID behavior for `main` at `199ef02`.
 
 Neither donor repository was modified or archived. No PR was merged.
+
+## Manual/offline qualification — 2026-10-26
+
+Owner decision (2026-10-26): no GitHub App and no new secret for the private
+OntoHistoCurator repository. CI no longer checks it out; its
+`mapppp-qualification` job reports the qualification as skipped/UNVERIFIED.
+Qualification is run manually with `scripts/qualify-hcm.ps1` or
+`scripts/qualify-hcm.sh` against the pinned commit `c426705`, which is now an
+ancestor of OntoHistoCurator `main`. See `qualification/README.md`. The results
+above are from local runs; a green CI run is not a qualification result.
