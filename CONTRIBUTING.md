@@ -8,7 +8,7 @@ Thank you for your interest in contributing. Contributions from researchers, dat
 
 ### 1. Report a Bug
 
-Open a [GitHub issue](https://github.com/dhuzard/piu-psych-swarm/issues) with the **Bug Report** template. Include:
+Open a [GitHub issue](https://github.com/Neuronautix/research-swarm/issues) with the **Bug Report** template. Include:
 
 - What you were trying to do
 - What happened instead
@@ -28,7 +28,7 @@ See `examples/piu_psychiatry/` for the reference format.
 
 ### 3. Suggest a Feature or Improvement
 
-Open a [GitHub issue](https://github.com/dhuzard/piu-psych-swarm/issues) with the **Feature Request** template. Describe:
+Open a [GitHub issue](https://github.com/Neuronautix/research-swarm/issues) with the **Feature Request** template. Describe:
 
 - The research workflow or use case you are trying to support
 - Why the current behavior does not cover it
@@ -48,8 +48,8 @@ Open a [GitHub issue](https://github.com/dhuzard/piu-psych-swarm/issues) with th
 ## Development Setup
 
 ```bash
-git clone https://github.com/dhuzard/piu-psych-swarm.git
-cd piu-psych-swarm
+git clone https://github.com/Neuronautix/research-swarm.git
+cd research-swarm
 make setup          # creates .venv and installs all dev dependencies
 cp .env.example .env
 # Add your API key to .env
@@ -84,4 +84,4 @@ See [CLAUDE.md](CLAUDE.md) for detailed architectural conventions.
 
 ## Questions?
 
-Open a [discussion](https://github.com/dhuzard/piu-psych-swarm/discussions) or file an issue with the **Question** label.
+Open a [GitHub issue](https://github.com/Neuronautix/research-swarm/issues) with the **Question** label (Discussions are not enabled on this repository).

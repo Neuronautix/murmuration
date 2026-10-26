@@ -2,7 +2,7 @@
 
 This guide takes you from zero to your first AI-generated research document.
 
-**Not a programmer?** Follow these steps exactly as written. Each command can be copy-pasted into your terminal. If you get stuck, see [FAQ.md](FAQ.md) or open a [GitHub issue](https://github.com/dhuzard/piu-psych-swarm/issues).
+**Not a programmer?** Follow these steps exactly as written. Each command can be copy-pasted into your terminal. If you get stuck, see [FAQ.md](FAQ.md) or open a [GitHub issue](https://github.com/Neuronautix/research-swarm/issues).
 
 ---
 
@@ -51,8 +51,8 @@ If you see `Python 3.10.x` or higher, you're good. If Python is missing or older
 ### Linux, Mac, or Windows WSL
 
 ```bash
-git clone https://github.com/dhuzard/piu-psych-swarm.git
-cd piu-psych-swarm
+git clone https://github.com/Neuronautix/research-swarm.git
+cd research-swarm
 make setup
 ```
 
@@ -64,8 +64,8 @@ sudo apt update && sudo apt install -y make
 ### Windows (PowerShell — no WSL needed)
 
 ```powershell
-git clone https://github.com/dhuzard/piu-psych-swarm.git
-cd piu-psych-swarm
+git clone https://github.com/Neuronautix/research-swarm.git
+cd research-swarm
 py -3 -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
 .\.venv\Scripts\python -m pip install -e ".[dev]"
@@ -243,4 +243,4 @@ After a run, check these locations:
 
 Run `python -m automation.main doctor` at any time for a full configuration health check.
 
-For more help: see [FAQ.md](FAQ.md) or open a [GitHub issue](https://github.com/dhuzard/piu-psych-swarm/issues).
+For more help: see [FAQ.md](FAQ.md) or open a [GitHub issue](https://github.com/Neuronautix/research-swarm/issues).

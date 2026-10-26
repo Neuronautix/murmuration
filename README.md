@@ -1,5 +1,7 @@
 # Research Swarm
 
+> Repository: [Neuronautix/research-swarm](https://github.com/Neuronautix/research-swarm). Formerly published as **METODAX** (`dhuzard/metodax`); old GitHub URLs redirect here.
+
 **Research Swarm automatically conducts literature reviews and writes research documents.**
 
 Give it a research question. It deploys a team of AI agents that search PubMed, read papers, debate findings across specialisms, and write a structured document with full citations — no programming required.
@@ -48,8 +50,8 @@ The entire team is configured through a single YAML file — `swarm_config.yml`.
 Requirements: Python 3.10+, `python3-venv`, `make`
 
 ```bash
-git clone https://github.com/dhuzard/piu-psych-swarm.git
-cd piu-psych-swarm
+git clone https://github.com/Neuronautix/research-swarm.git
+cd research-swarm
 make setup
 ```
 
@@ -62,8 +64,8 @@ sudo apt update && sudo apt install -y python3 python3-venv make
 ### Native Windows (PowerShell)
 
 ```powershell
-git clone https://github.com/dhuzard/piu-psych-swarm.git
-cd piu-psych-swarm
+git clone https://github.com/Neuronautix/research-swarm.git
+cd research-swarm
 py -3 -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
 .\.venv\Scripts\python -m pip install -e ".[dev]"
