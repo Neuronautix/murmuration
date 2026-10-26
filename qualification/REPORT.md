@@ -69,3 +69,15 @@ repository with `contents: read`, plus the
 explicit credential check until these are configured. All six
 qualification tests passed locally against the pinned commit. No PR or donor
 repository has been merged or archived.
+
+_Superseded on 2026-10-26: the GitHub App approach was dropped; see below._
+
+## Manual/offline qualification — 2026-10-26
+
+Owner decision (2026-10-26): no GitHub App and no new secret for the private
+OntoHistoCurator repository. CI no longer checks it out; its
+`mapppp-qualification` job reports the qualification as skipped/UNVERIFIED.
+Qualification is run manually with `scripts/qualify-hcm.ps1` or
+`scripts/qualify-hcm.sh` against the pinned commit `c426705`, which is now an
+ancestor of OntoHistoCurator `main`. See `qualification/README.md`. The results
+above are from local runs; a green CI run is not a qualification result.
