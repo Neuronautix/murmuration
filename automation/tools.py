@@ -1,5 +1,5 @@
 """
-tools.py — Tool Functions for the Research Swarm
+tools.py — Tool Functions for Murmuration
 
 Each function decorated with @tool becomes available to the LangGraph agents.
 Tools are registered in swarm_config.yml and dynamically loaded by config.py.
@@ -14,7 +14,7 @@ Built-in Tools:
   - search_semantic_scholar    : Search Semantic Scholar (indexes preprints + journals)
     - trace_literature_network   : Expand from a seed paper via references + lead authors
   - check_schema_org           : Validate terms against Schema.org vocabulary
-  - write_manuscript_section   : Write a Markdown section to the Drafts/ directory
+  - write_manuscript_section   : Write a Markdown section to swarm.output_dir
   - search_you_engine          : Search the live web via You.com API
   - append_traceability_matrix : Log a fact to the Knowledge Traceability Matrix
   - search_knowledge_base      : Search local vectorized KB documents
@@ -35,7 +35,7 @@ from langchain_core.tools import tool
 # ═══════════════════════════════════════════════════════
 
 SEMANTIC_SCHOLAR_HEADERS = {
-    "User-Agent": "ResearchSwarm/1.0 (Academic Research)",
+    "User-Agent": "Murmuration/1.0 (Academic Research)",
 }
 
 TOPIC_STOPWORDS = {
@@ -251,7 +251,7 @@ def search_semantic_scholar(query: str, max_results: int = 5) -> str:
         "limit": min(max_results, 10),
         "fields": "title,abstract,year,authors,externalIds,venue,url",
     }
-    headers = {"User-Agent": "ResearchSwarm/1.0 (Academic Research)"}
+    headers = {"User-Agent": "Murmuration/1.0 (Academic Research)"}
 
     try:
         resp = requests.get(url, params=params, headers=headers, timeout=15)
@@ -533,7 +533,9 @@ def write_manuscript_section(section_name: str, content: str) -> str:
     the base name already exists.
     """
 
-    drafts_dir = os.path.join(os.path.dirname(__file__), "..", "Drafts")
+    from automation.config import resolve_swarm_path
+
+    drafts_dir = str(resolve_swarm_path(None, "output_dir"))
     os.makedirs(drafts_dir, exist_ok=True)
     base_slug = section_name.lower().replace(" ", "_")
 
@@ -566,9 +568,9 @@ def append_traceability_matrix(fact: str, source: str, epistemic_tag: str) -> st
         source: The URL, PMID, or document reference where this was found.
         epistemic_tag: One of [FACT], [INFERENCE], or [SPECULATION].
     """
-    filepath = os.path.join(
-        os.path.dirname(__file__), "..", "Knowledge_Traceability_Matrix.md"
-    )
+    from automation.config import resolve_swarm_path
+
+    filepath = str(resolve_swarm_path(None, "traceability_matrix"))
 
     # Guard: the file must exist and contain the table header before we append.
     # Without this check a corrupted or deleted matrix silently receives raw rows,
@@ -818,7 +820,7 @@ def scrape_webpage(url: str, max_chars: int = 5000) -> str:
     # ── Fallback: direct HTTP + BeautifulSoup ───────────────────────────
     try:
         from bs4 import BeautifulSoup
-        req_headers = {"User-Agent": "ResearchSwarm/1.0 (Academic Research)"}
+        req_headers = {"User-Agent": "Murmuration/1.0 (Academic Research)"}
         resp = requests.get(url, headers=req_headers, timeout=15)
         resp.raise_for_status()
 
@@ -901,7 +903,7 @@ def lookup_doi(query: str) -> str:
             crossref_url = f"https://api.crossref.org/works/{urllib.parse.quote(clean)}"
             r = requests.get(
                 crossref_url,
-                headers={"User-Agent": "ResearchSwarm/1.0 (mailto:research@example.com)"},
+                headers={"User-Agent": "Murmuration/1.0 (mailto:research@example.com)"},
                 timeout=15,
             )
             r.raise_for_status()
@@ -912,7 +914,7 @@ def lookup_doi(query: str) -> str:
             r = requests.get(
                 crossref_url,
                 params={"query": query, "rows": 3},
-                headers={"User-Agent": "ResearchSwarm/1.0 (mailto:research@example.com)"},
+                headers={"User-Agent": "Murmuration/1.0 (mailto:research@example.com)"},
                 timeout=15,
             )
             r.raise_for_status()
@@ -1061,35 +1063,35 @@ def search_knowledge_base(query: str, agent_name: str = "all", top_k: int = 5) -
 
 @tool
 def git_commit_snapshot(message: str) -> str:
-    """Creates a git commit of swarm output files only (Drafts/ directory and the
-    Knowledge Traceability Matrix). Stages only known safe paths — never the full
-    working tree — to prevent accidentally committing credentials or binaries.
+    """Creates a git commit of swarm output files only (swarm.output_dir and the
+    configured Knowledge Traceability Matrix). Stages only known safe paths — never
+    the full working tree — to prevent accidentally committing credentials or binaries.
 
     Use this after write_manuscript_section to lock in a versioned audit snapshot.
 
     Args:
         message: Descriptive commit message summarizing what was produced.
     """
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    repo_root = Path(__file__).resolve().parent.parent
 
-    # Determine safe staging paths from config (fall back to defaults)
-    try:
-        from automation.config import load_config
-        cfg = load_config()
-        output_dir = cfg["swarm"].get("output_dir", "./Drafts").lstrip("./")
-        matrix = cfg["swarm"].get(
-            "traceability_matrix", "./Knowledge_Traceability_Matrix.md"
-        ).lstrip("./")
-    except Exception:
-        output_dir = "Drafts"
-        matrix = "Knowledge_Traceability_Matrix.md"
+    # Stage the same configured paths the writer and matrix tools use
+    from automation.config import resolve_swarm_path
 
-    safe_paths = [output_dir, matrix]
+    safe_paths = []
+    for key in ("output_dir", "traceability_matrix"):
+        path = resolve_swarm_path(None, key)
+        if path.exists() and path.is_relative_to(repo_root):
+            safe_paths.append(str(path.relative_to(repo_root)))
+
+    if not safe_paths:
+        return "No swarm output paths inside the repository to commit."
 
     try:
-        # Stage only the swarm's output paths — never git add -A
+        # Stage only the swarm's output paths — never git add -A. Runtime outputs are
+        # gitignored to keep casual `git add` away from them, so force-add these
+        # explicitly named paths: committing them is this tool's purpose.
         subprocess.run(
-            ["git", "add", "--", *safe_paths],
+            ["git", "add", "--force", "--", *safe_paths],
             cwd=repo_root,
             capture_output=True,
             text=True,

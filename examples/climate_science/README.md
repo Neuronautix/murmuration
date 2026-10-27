@@ -1,6 +1,6 @@
 # Climate Science Example
 
-A ready-to-run Research Swarm configuration for climate science research and
+A ready-to-run Murmuration configuration for climate science research and
 policy analysis.
 
 ## Team

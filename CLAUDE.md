@@ -2,7 +2,7 @@
 
 ## Project Purpose
 
-Research Swarm is a **configuration-driven** multi-agent research framework built on LangGraph.
+Murmuration is a **configuration-driven** multi-agent research framework built on LangGraph.
 The core design invariant is: **a user should never need to modify Python code to customize swarm behavior.**
 All customization flows through `swarm_config.yml` and `agents/*/persona.md`.
 
@@ -101,7 +101,7 @@ Do not modify these files unless the user explicitly asks. Do not move them back
 - Tool functions must be synchronous (not `async def`). The graph handles concurrency.
 - Tool functions must return a `str` — the string is injected into the agent's context.
 - Register new tools in `swarm_config.yml` under `tools:` before assigning them to personas.
-- HTTP requests should include a `User-Agent: ResearchSwarm/1.0 (Academic Research)` header.
+- HTTP requests should include a `User-Agent: Murmuration/1.0 (Academic Research)` header.
 
 ### Config loading (`automation/config.py`)
 

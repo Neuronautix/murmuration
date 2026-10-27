@@ -29,9 +29,9 @@ automation/db/
 # Swarm runtime outputs — auto-generated, not source files
 # These accumulate during research runs and should not be committed.
 # Track the empty Drafts/ folder via Drafts/.gitkeep.
-Drafts/*.md
-Drafts/*.json
-Knowledge_Traceability_Matrix.md
+Drafts/**/*.md
+Drafts/**/*.json
+Knowledge_Traceability_Matrix*.md
 
 # OS
 .DS_Store
