@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "research-swarm"
+name = "murmuration"
 version = "0.2.0"
 description = "A configurable multi-agent research swarm built on LangGraph — deploy your own autonomous research team for any scientific domain"
 readme = "README.md"

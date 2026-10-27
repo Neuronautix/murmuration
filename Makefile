@@ -1,6 +1,6 @@
 .PHONY: setup run ingest info doctor lint format test clean help
 
-# Research Swarm — Makefile
+# Murmuration — Makefile
 
 VENV     = .venv
 
@@ -30,7 +30,7 @@ endif
 
 help:
 	@$(BLANK_LINE_CMD)
-	@echo   Research Swarm — Available Commands
+	@echo   Murmuration — Available Commands
 	@echo   ====================================
 	@echo   make setup       Create venv, install deps, copy .env.example
 	@echo   make run         Run the swarm (set PROMPT="your prompt")

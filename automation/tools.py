@@ -1,5 +1,5 @@
 """
-tools.py — Tool Functions for the Research Swarm
+tools.py — Tool Functions for Murmuration
 
 Each function decorated with @tool becomes available to the LangGraph agents.
 Tools are registered in swarm_config.yml and dynamically loaded by config.py.
@@ -35,7 +35,7 @@ from langchain_core.tools import tool
 # ═══════════════════════════════════════════════════════
 
 SEMANTIC_SCHOLAR_HEADERS = {
-    "User-Agent": "ResearchSwarm/1.0 (Academic Research)",
+    "User-Agent": "Murmuration/1.0 (Academic Research)",
 }
 
 TOPIC_STOPWORDS = {
@@ -251,7 +251,7 @@ def search_semantic_scholar(query: str, max_results: int = 5) -> str:
         "limit": min(max_results, 10),
         "fields": "title,abstract,year,authors,externalIds,venue,url",
     }
-    headers = {"User-Agent": "ResearchSwarm/1.0 (Academic Research)"}
+    headers = {"User-Agent": "Murmuration/1.0 (Academic Research)"}
 
     try:
         resp = requests.get(url, params=params, headers=headers, timeout=15)
@@ -820,7 +820,7 @@ def scrape_webpage(url: str, max_chars: int = 5000) -> str:
     # ── Fallback: direct HTTP + BeautifulSoup ───────────────────────────
     try:
         from bs4 import BeautifulSoup
-        req_headers = {"User-Agent": "ResearchSwarm/1.0 (Academic Research)"}
+        req_headers = {"User-Agent": "Murmuration/1.0 (Academic Research)"}
         resp = requests.get(url, headers=req_headers, timeout=15)
         resp.raise_for_status()
 
@@ -903,7 +903,7 @@ def lookup_doi(query: str) -> str:
             crossref_url = f"https://api.crossref.org/works/{urllib.parse.quote(clean)}"
             r = requests.get(
                 crossref_url,
-                headers={"User-Agent": "ResearchSwarm/1.0 (mailto:research@example.com)"},
+                headers={"User-Agent": "Murmuration/1.0 (mailto:research@example.com)"},
                 timeout=15,
             )
             r.raise_for_status()
@@ -914,7 +914,7 @@ def lookup_doi(query: str) -> str:
             r = requests.get(
                 crossref_url,
                 params={"query": query, "rows": 3},
-                headers={"User-Agent": "ResearchSwarm/1.0 (mailto:research@example.com)"},
+                headers={"User-Agent": "Murmuration/1.0 (mailto:research@example.com)"},
                 timeout=15,
             )
             r.raise_for_status()

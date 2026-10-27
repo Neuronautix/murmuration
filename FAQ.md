@@ -4,7 +4,7 @@
 
 ---
 
-### What does Research Swarm actually produce?
+### What does Murmuration actually produce?
 
 It produces **formatted Markdown documents** — literature reviews, evidence briefs, scoping review outlines, grant background sections, and manuscript drafts. Each output includes in-text citations (e.g., [1], [2]) and a full References section at the bottom. Outputs are saved to the `Drafts/` folder.
 
@@ -86,7 +86,7 @@ The swarm uses real APIs (PubMed, Semantic Scholar, Crossref) to retrieve papers
 
 ### Can I use this for clinical decision-making?
 
-No. Research Swarm produces literature synthesis for research and educational purposes only. It is not a clinical decision support tool. All outputs should be reviewed by qualified clinicians before any clinical application.
+No. Murmuration produces literature synthesis for research and educational purposes only. It is not a clinical decision support tool. All outputs should be reviewed by qualified clinicians before any clinical application.
 
 ---
 

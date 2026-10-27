@@ -1,5 +1,5 @@
 """
-main.py — CLI Entry Point for the Research Swarm
+main.py — CLI Entry Point for Murmuration
 
 Usage:
     python -m automation.main init
@@ -82,7 +82,7 @@ console = Console()
 
 app = typer.Typer(
     name="swarm",
-    help="Research Swarm CLI — A configurable multi-agent research system built on LangGraph.",
+    help="Murmuration CLI — A configurable multi-agent research system built on LangGraph.",
     add_completion=False,
 )
 blueprint_app = typer.Typer(help="Export or import portable blueprint files for reuse across repos.")

@@ -1,6 +1,8 @@
-# Research Swarm
+# Murmuration
 
-**Research Swarm automatically conducts literature reviews and writes research documents.**
+> *A murmuration is a flock of starlings that moves as one, with no leader, each bird following a few simple rules. Here, the birds are research agents and the rules live in `swarm_config.yml`.*
+
+**Murmuration automatically conducts literature reviews and writes research documents.**
 
 Give it a research question. It deploys a team of AI agents that search PubMed, read papers, debate findings across specialisms, and write a structured document with full citations — no programming required.
 
@@ -18,7 +20,7 @@ Give it a research question. It deploys a team of AI agents that search PubMed, 
 
 ## How It Works
 
-Research Swarm coordinates a team of specialist AI agents through a supervised graph. Each agent has a focused role, a private knowledge base, and access to a curated set of research tools. An orchestrator routes sub-questions to the right specialists, a Reviewer-2 checkpoint validates outputs against configurable quality standards, and a Journalist agent writes the final structured document.
+Murmuration coordinates a team of specialist AI agents through a supervised graph. Each agent has a focused role, a private knowledge base, and access to a curated set of research tools. An orchestrator routes sub-questions to the right specialists, a Reviewer-2 checkpoint validates outputs against configurable quality standards, and a Journalist agent writes the final structured document.
 
 The entire team is configured through a single YAML file — `swarm_config.yml`. You never need to modify Python code to deploy a new research domain.
 
