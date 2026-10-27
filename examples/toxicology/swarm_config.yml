@@ -200,6 +200,25 @@ tools:
     function: "git_commit_snapshot"
     description: "Commit swarm output files (Drafts/TOCSAS/ and traceability matrix) to git"
 
+# ── Journalist Brief ─────────────────────────────────
+# Rendered into the Journalist's task message. Reads `output_sections` below so
+# the mandatory sections A–J are enforced by the runtime, not only by persona text.
+journalist:
+  brief: |
+    Write the complete TOCSAS synthesis. Produce ALL of the following sections, in order,
+    using these exact headings:
+    {% for section in output_sections %}
+      {{ section }}
+    {% endfor %}
+    Every claim in sections B, C and I must carry an in-text citation that appears in
+    section J. Keep observation, quantitative change, interpretation, adversity judgment
+    and mechanistic speculation in separate sentences. The reviewer will also check:
+    {% for item in required_elements %}
+      • {{ item }}
+    {% endfor %}
+    Save each section to disk with your writing tool as it is completed, then create a
+    version snapshot of the final output.
+
 # ── Reviewer-2 (Adversarial Checkpoint) ──────────────
 reviewer:
   enabled: true
@@ -263,9 +282,9 @@ epistemic_tags:
   - "[MISSING_DATA]"    # A metadata element required for interpretation that was not reported
 
 # ── Mandatory Output Sections ─────────────────────────
-# The Journalist must produce all sections listed here.
-# Note: the runtime does not read this key. The sections are enforced
-# through the TOCSAS Dr. Nexus and Journalist personas and the reviewer rules.
+# The Journalist must produce all sections listed here. The list is read by
+# the `journalist.brief` template above and also referenced by the TOCSAS
+# Dr. Nexus and Journalist personas and the reviewer rules.
 output_sections:
   - "A. Research Scope"
   - "B. Key Evidence Summary"

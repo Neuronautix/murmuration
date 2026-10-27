@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from automation.config import load_config
+from automation.config import build_journalist_brief, load_config
 
 console = Console()
 
@@ -172,6 +172,21 @@ def _check_traceability_coverage(
             )
 
 
+def _check_journalist_brief(report: SwarmDoctorReport, config: dict) -> None:
+    """Render journalist.brief with the Journalist's real tool names so template errors surface here."""
+    journalist_name = (config.get("orchestrator") or {}).get("journalist")
+    journalist = next((p for p in config.get("personas", []) if p.get("name") == journalist_name), None)
+    tool_names = []
+    for key in (journalist or {}).get("tools", []):
+        spec = (config.get("tools") or {}).get(key) or {}
+        if spec.get("function"):
+            tool_names.append(spec["function"])
+    try:
+        build_journalist_brief(config, tool_names)
+    except ValueError as e:
+        report.issues.append(ValidationIssue("error", str(e), "swarm_config.yml"))
+
+
 def _check_reviewer_semantics(report: SwarmDoctorReport, reviewer: dict) -> None:
     reviewer_enabled = reviewer.get("enabled", True)
     max_revision_loops = reviewer.get("max_revision_loops", 3)
@@ -328,6 +343,7 @@ def inspect_swarm(root_dir: Path) -> SwarmDoctorReport:
         max_tool_rounds=orchestrator_block.get("max_tool_rounds_per_agent", 0),
     )
     _check_reviewer_semantics(report, reviewer)
+    _check_journalist_brief(report, config)
     _check_traceability_coverage(
         report,
         personas,

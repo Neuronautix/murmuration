@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import jinja2
 import yaml
 from rich.console import Console
 
@@ -46,6 +47,14 @@ def load_config(config_path: Path = CONFIG_PATH) -> dict:
             f"swarm_config.yml is missing required keys: {missing}\n"
             f"Please refer to the example configuration."
         )
+
+    journalist = config.get("journalist")
+    if journalist is not None:
+        if not isinstance(journalist, dict):
+            raise ValueError("swarm_config.yml: 'journalist' must be a mapping (e.g. journalist: {brief: ...}).")
+        brief = journalist.get("brief")
+        if brief is not None and not isinstance(brief, str):
+            raise ValueError("swarm_config.yml: 'journalist.brief' must be a string (use a YAML block scalar '|').")
 
     return config
 
@@ -124,6 +133,57 @@ def build_reviewer_prompt(config: dict) -> str:
         f"reply exactly with 'APPROVED'."
     )
 
+
+
+# Default instructions appended to the Journalist's task message. Rendered with
+# Jinja2; see build_journalist_brief() for the available variables. Override it
+# with `journalist.brief` in swarm_config.yml — never by editing this file.
+DEFAULT_JOURNALIST_BRIEF = """\
+Write a complete structured output. You MUST include:
+{% for item in required_elements %}
+  • {{ item }}
+{% else %}
+  • Formal in-text citations [1], [2]…
+  • A limitations section
+  • A complete formal References section at the end
+{% endfor %}
+{% if tool_names %}
+Your tools: {{ tool_names | join(', ') }}. Save the finished output to disk with your
+writing tool before you finish, then create a version snapshot if you have a snapshot tool.
+{% endif %}
+"""
+
+
+def build_journalist_brief(config: dict, tool_names: list | None = None) -> str:
+    """Render the Journalist's task brief from ``journalist.brief`` (or the default).
+
+    The template is Jinja2 and sees every top-level key of swarm_config.yml
+    (``swarm``, ``reviewer``, ``epistemic_tags``, ``output_sections`` …) plus:
+
+      required_elements  reviewer.required_elements (list of str)
+      tool_names         names of the tools bound to the Journalist (list of str)
+      journalist_name    the Journalist persona's name
+
+    Undefined variables are an error so a typo in the template fails at build
+    time (and in ``swarm doctor``) rather than silently producing an empty brief.
+    """
+    template_src = (config.get("journalist") or {}).get("brief") or DEFAULT_JOURNALIST_BRIEF
+    env = jinja2.Environment(undefined=jinja2.StrictUndefined, trim_blocks=True, lstrip_blocks=True,
+                             keep_trailing_newline=False, autoescape=False)
+    context = dict(config)
+    context.update({
+        "required_elements": list((config.get("reviewer") or {}).get("required_elements") or []),
+        "tool_names": list(tool_names or []),
+        "journalist_name": (config.get("orchestrator") or {}).get("journalist", "Journalist"),
+    })
+    try:
+        rendered = env.from_string(template_src).render(**context)
+    except jinja2.TemplateError as e:
+        raise ValueError(f"swarm_config.yml: journalist.brief failed to render: {e}") from e
+    rendered = rendered.strip()
+    if not rendered:
+        raise ValueError("swarm_config.yml: journalist.brief rendered to an empty string.")
+    return rendered
 
 
 def get_persona_config(config: dict, persona_name: str) -> dict:

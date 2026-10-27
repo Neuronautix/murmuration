@@ -195,6 +195,28 @@ tools:
     function: "git_commit_snapshot"
     description: "Commit swarm output files (Drafts/ and traceability matrix) to git"
 
+# ── Journalist Brief ─────────────────────────────────
+# Instructions appended to the Journalist's task message on every run (and
+# every revision). This is where domain-specific output requirements belong —
+# mandatory sections, tables, framing rules — not in Python.
+#
+# The brief is a Jinja2 template. It can read any top-level key of this file
+# (e.g. `reviewer`, `epistemic_tags`, or a custom `output_sections` list) plus:
+#   required_elements  — reviewer.required_elements
+#   tool_names         — the Journalist's tools, by function name
+#   journalist_name    — the Journalist persona's name
+# When omitted, the default brief lists `reviewer.required_elements` as bullets
+# and tells the Journalist to save its output with its writing tool.
+#
+# journalist:
+#   brief: |
+#     Write a complete structured output. You MUST include:
+#     {% for item in required_elements %}
+#       • {{ item }}
+#     {% endfor %}
+#       • A section comparing [construct A] with [construct B]
+#     Save each section with your writing tool, then create a version snapshot.
+
 # ── Reviewer-2 (Adversarial Checkpoint) ──────────────
 # The Reviewer gates all final outputs. Customize its
 # constraints for your domain's epistemological standards.

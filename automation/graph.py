@@ -62,6 +62,7 @@ from pydantic import BaseModel
 
 from automation.config import (
     build_agent_system_prompt,
+    build_journalist_brief,
     build_reviewer_prompt,
     create_model,
     create_reviewer_model,
@@ -501,6 +502,8 @@ def make_journalist_node(config: dict, model, tools: list):
     journalist_cfg = get_persona_config(config, journalist_name)
     system_prompt = build_agent_system_prompt(journalist_cfg)
     max_rounds = config["orchestrator"].get("max_tool_rounds_per_agent", 5)
+    # Rendered once at build time: a broken template fails before any API spend.
+    brief = build_journalist_brief(config, [getattr(t, "name", "") for t in tools])
 
     async def journalist_node(state: GraphState):
         agent_outputs = state.get("agent_outputs", {})
@@ -517,13 +520,7 @@ def make_journalist_node(config: dict, model, tools: list):
             f"RESEARCH TASK:\n{state['task']}\n\n"
             f"ALL SPECIALIST FINDINGS:\n{full_findings}"
             f"{revision_note}\n\n"
-            "Write a complete structured output. You MUST include:\n"
-            "  • Formal in-text citations [1], [2]…\n"
-            "  • A section explicitly distinguishing high engagement from clinical impairment\n"
-            "  • A limitations section\n"
-            "  • A complete formal References section at the end\n"
-            "Save the output to disk using write_manuscript_section, "
-            "then call git_commit_snapshot."
+            f"{brief}"
         ))
         response, usage = await _run_tool_loop_async(
             model, tools,

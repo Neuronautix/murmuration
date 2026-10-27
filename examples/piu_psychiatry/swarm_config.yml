@@ -191,6 +191,18 @@ tools:
     function: "git_commit_snapshot"
     description: "Commit swarm output files (Drafts/ and traceability matrix) to git"
 
+# ── Journalist Brief ─────────────────────────────────
+# Rendered into the Journalist's task message. The engagement-vs-impairment
+# section is the PIU domain's framing rule; it used to live in graph.py.
+journalist:
+  brief: |
+    Write a complete structured output. You MUST include:
+    {% for item in required_elements %}
+      • {{ item }}
+    {% endfor %}
+      • A section explicitly distinguishing high engagement from clinical impairment
+    Save the output to disk with your writing tool, then create a version snapshot.
+
 # ── Reviewer-2 (Adversarial Checkpoint) ──────────────
 # The Reviewer gates all final outputs. Customize its
 # constraints for your domain.

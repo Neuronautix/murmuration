@@ -103,6 +103,9 @@ class SwarmSpec(BaseModel):
         "[INFERENCE]",
         "[SPECULATION]",
     ])
+    # Optional Jinja2 template for the Journalist's task brief (journalist.brief).
+    # None means the runtime default in automation.config.DEFAULT_JOURNALIST_BRIEF.
+    journalist_brief: str | None = None
     tool_registry: dict[str, ToolSpec]
 
     @field_validator("swarm_name", "swarm_description", "domain", "model_provider", "model_name", "model_env_key")
@@ -223,4 +226,5 @@ class SwarmSpec(BaseModel):
                 "checkpoints": self.hitl_checkpoints,
             },
             "epistemic_tags": self.epistemic_tags,
+            **({"journalist": {"brief": self.journalist_brief}} if self.journalist_brief else {}),
         }

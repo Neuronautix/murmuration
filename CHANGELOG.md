@@ -25,6 +25,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - An explicit LangGraph `recursion_limit` is derived from `max_agent_calls` and `max_revision_loops`.
 
 ### Added
+- **`journalist.brief`**: the Journalist's task instructions are now a Jinja2 template in `swarm_config.yml` (audit finding B2). The runtime previously hard-coded a psychiatry-specific requirement ("distinguish high engagement from clinical impairment") and two tool names for every domain. The default brief lists `reviewer.required_elements`; the toxicology and HCM examples render their `output_sections` lists, and the PIU example keeps the engagement-vs-impairment rule. `swarm doctor` renders the template and reports errors; the builder round-trips the key.
 - `orchestrator.max_findings_chars` and `orchestrator.max_peer_chars` (documented as commented defaults in `swarm_config.yml`).
 - `model.pricing: {input_per_m, output_per_m}` for the cost estimate in `run_metrics.json`; defaults stay at gpt-4o list prices.
 - `swarm doctor` warns when a specialist with search tools has no traceability tool.

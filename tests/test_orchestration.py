@@ -353,15 +353,28 @@ def test_journalist_revision_prompt_labels_the_previous_draft():
     assert "### [Journalist]" not in second
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT B2: the Journalist brief in graph.py hard-codes psychiatry wording "
-                                       "and tool names instead of reading them from swarm_config.yml")
-def test_journalist_brief_is_domain_neutral():
+def test_journalist_brief_is_domain_neutral_and_lists_required_elements():
+    """AUDIT B2: the default brief comes from config, not from psychiatry text in graph.py."""
+    cfg = make_config()
+    cfg["reviewer"]["required_elements"] = ["a limitations section", "a formal References section"]
     chat = FakeChat([decision(["Journalist"])])
-    graph = build(make_config(), chat)
+    graph = build(cfg, chat, tools_for={"Journalist": [dummy_tool]})
     run(graph)
     brief = chat.human("Journalist")
     assert "clinical impairment" not in brief
     assert "write_manuscript_section" not in brief and "git_commit_snapshot" not in brief
+    assert "• a limitations section" in brief and "• a formal References section" in brief
+    assert "Your tools: dummy_tool" in brief
+
+
+def test_custom_journalist_brief_is_rendered_with_config_variables():
+    cfg = make_config()
+    cfg["output_sections"] = ["A. Scope", "B. Evidence"]
+    cfg["journalist"] = {"brief": "Sections:{% for s in output_sections %} {{ s }};{% endfor %} for {{ journalist_name }}"}
+    chat = FakeChat([decision(["Journalist"])])
+    graph = build(cfg, chat)
+    run(graph)
+    assert chat.human("Journalist").endswith("Sections: A. Scope; B. Evidence; for Journalist")
 
 
 # ── 4. Robustness ──────────────────────────────────────────────────────────
@@ -648,3 +661,69 @@ def test_run_metrics_uses_configured_pricing(tmp_path):
     _write_run_metrics(cfg, "t", usage)
     metrics = json.loads((tmp_path / "run_metrics.json").read_text())
     assert metrics["estimated_cost_usd"] == 3.0 and "model.pricing" in metrics["cost_note"]
+
+
+# ── 9. Journalist brief (audit B2) ─────────────────────────────────────────
+
+
+def test_broken_journalist_brief_fails_at_build_time_and_in_doctor(tmp_path):
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH, build_journalist_brief
+    cfg = make_config()
+    cfg["journalist"] = {"brief": "{{ no_such_variable }}"}
+    with pytest.raises(ValueError, match="journalist.brief failed to render"):
+        build(cfg, FakeChat([decision(["Journalist"])]))
+    with pytest.raises(ValueError, match="empty"):
+        build_journalist_brief({**cfg, "journalist": {"brief": "{% if false %}x{% endif %}"}})
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["journalist"] = {"brief": "{% for x in output_sections %}{{ x }}{% endfor %}"}  # key absent in root config
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    errors = [i.message for i in inspect_swarm(tmp_path).issues if i.severity == "error"]
+    assert any("journalist.brief failed to render" in m for m in errors)
+
+
+def test_load_config_rejects_non_string_brief(tmp_path):
+    import yaml
+
+    from automation.config import CONFIG_PATH, load_config
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["journalist"] = {"brief": ["not", "a", "string"]}
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    with pytest.raises(ValueError, match="journalist.brief"):
+        load_config(tmp_path / "swarm_config.yml")
+
+
+@pytest.mark.parametrize("pack, first, last", [
+    ("toxicology", "A. Research Scope", "J. References"),
+    ("hcm", "A. Research scope", "I. References"),
+])
+def test_example_briefs_render_their_output_sections(pack, first, last):
+    from pathlib import Path
+
+    from automation.config import build_journalist_brief, load_config
+    cfg = load_config(Path(__file__).resolve().parents[1] / "examples" / pack / "swarm_config.yml")
+    brief = build_journalist_brief(cfg, ["write_manuscript_section"])
+    assert first in brief and last in brief
+    assert brief.index(first) < brief.index(last)
+    assert cfg["reviewer"]["required_elements"][0] in brief
+
+
+def test_builder_spec_round_trips_journalist_brief(tmp_path):
+    """The builder must preserve journalist.brief when it rewrites swarm_config.yml."""
+    import shutil
+    from pathlib import Path
+
+    import yaml
+
+    from automation.builder.loader import load_swarm_spec_from_disk
+    root = Path(__file__).resolve().parents[1]
+    shutil.copy(root / "examples/toxicology/swarm_config.yml", tmp_path / "swarm_config.yml")
+    shutil.copytree(root / "examples/toxicology", tmp_path / "examples/toxicology")
+    original = yaml.safe_load((tmp_path / "swarm_config.yml").read_text(encoding="utf-8"))["journalist"]["brief"]
+    spec = load_swarm_spec_from_disk(tmp_path)
+    assert spec.journalist_brief == original
+    assert spec.to_config()["journalist"] == {"brief": original}
+    spec_without = spec.model_copy(update={"journalist_brief": None})
+    assert "journalist" not in spec_without.to_config()

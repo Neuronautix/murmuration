@@ -108,5 +108,6 @@ def load_swarm_spec_from_disk(root_dir: Path) -> SwarmSpec:
         hitl_enabled=hitl.get("enabled", False),
         hitl_checkpoints=hitl.get("checkpoints", []),
         epistemic_tags=config.get("epistemic_tags", ["[FACT]", "[INFERENCE]", "[SPECULATION]"]),
+        journalist_brief=(config.get("journalist") or {}).get("brief"),
         tool_registry=tool_registry,
     )

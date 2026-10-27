@@ -56,8 +56,9 @@ checks are in `tests/test_example_packs.py`.
 - The traceability matrix path is `./Knowledge_Traceability_Matrix_TOCSAS.md`.
 - In-text references to `swarm_config_tocsas.yml` in the Dr. Nexus and
   Journalist personas now name `examples/toxicology/swarm_config.yml`.
-- `output_sections` is kept for reference. The runtime does not read it: the
-  sections are enforced through the personas and the reviewer rules.
+- `output_sections` is read by the `journalist.brief` template in
+  `swarm_config.yml`, which renders the section list into the Journalist's task
+  message; the personas and the reviewer rules reinforce it.
 - Each `KB/README.md` is kept as written. Some of them list planned KB files
   that the donor never created. Only the files present here exist.
 

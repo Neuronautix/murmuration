@@ -191,6 +191,12 @@ For maximum adversarial diversity, set the reviewer to a different model provide
 
 ---
 
+## Journalist Brief
+
+The instructions the Journalist receives with the collected findings come from `journalist.brief` in `swarm_config.yml`. It is a Jinja2 template that can read any top-level config key (for example a custom `output_sections` list) plus `required_elements`, `tool_names` and `journalist_name`. When omitted, the default brief lists `reviewer.required_elements` as mandatory bullets and asks the Journalist to save its output with its writing tool. Put domain-specific output requirements here, never in Python; `examples/toxicology/` and `examples/hcm/` show briefs that enforce a fixed section list.
+
+---
+
 ## Human-in-the-Loop
 
 Enable HITL checkpoints in `swarm_config.yml` to pause the swarm at key decision points:

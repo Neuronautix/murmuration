@@ -26,8 +26,11 @@ the tools from the orchestrator persona in the templates. The `langgraph>=1.0` f
 bumped because `main` now pins `langchain-core<1`; `handle_tool_errors=True` gives the same
 behaviour on every supported version.
 
-Still open (strict `xfail` tests remain): **B2** (Journalist brief in config), **B4** (tool
-rounds exhausted → empty output), **B5** (HITL replays LLM calls), **R1** (findings
+**B2** was fixed in a second follow-up: the brief is now the `journalist.brief` Jinja2
+template (default in `automation/config.py`), rendered once at build time and validated by
+`swarm doctor`; `output_sections` in the toxicology and HCM examples is now read by it.
+
+Still open (strict `xfail` tests remain): **B4** (tool rounds exhausted → empty output), **B5** (HITL replays LLM calls), **R1** (findings
 overwritten on re-dispatch), **R3** (one failed branch aborts the run), plus the design items
 I1–I6 and R2, R5, R6, R9, R10.
 
