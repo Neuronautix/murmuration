@@ -68,11 +68,11 @@ from automation.builder.wizard import (
     upsert_tool_in_spec,
 )
 from automation.config import (
+    get_hitl_config,
     load_config,
     validate_env,
-    get_hitl_config,
 )
-from automation.graph import build_graph, Command  # Command re-exported from graph.py
+from automation.graph import Command, build_graph  # Command re-exported from graph.py
 
 # Load environment configuration (.env)
 load_dotenv()
@@ -1242,7 +1242,7 @@ def info():
 
     typer.secho(f"\n📡 Model: {model['provider']}/{model['name']} (temp={model.get('temperature', 0.2)})")
 
-    typer.secho(f"\n👥 Personas:")
+    typer.secho("\n👥 Personas:")
     for p in config["personas"]:
         tools_str = ", ".join(p.get("tools", []))
         typer.secho(f"   {p.get('icon', '🤖')} {p['name']} — {p['role']} [{tools_str}]")
