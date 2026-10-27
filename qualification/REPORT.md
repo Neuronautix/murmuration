@@ -22,9 +22,9 @@ explicit UTF-8 fixture writes passed all 9 original tests. No test was skipped.
 
 | Gate | Result |
 |---|---|
-| METODAX suite under compatible pinned LangChain versions | 23 passed |
+| METODAX suite under compatible pinned LangChain versions | 29 passed after HCMO refinement |
 | Ruff on changed Python files | Passed |
-| Clean virtual environment, OntoHistoCurator pinned at `c426705` | 5 passed; one dependency deprecation warning |
+| Clean virtual environment, OntoHistoCurator pinned at `c426705` | 6 passed after HCMO refinement |
 | Real MAPPPP 0.1.0 validator on generated pilot and exporter bundles | Passed |
 | Native ingestion / proposal-only staging / no graph promotion | Passed |
 | Repeated identical export and ingestion | Passed, identical payload and staged record |
@@ -36,8 +36,9 @@ explicit UTF-8 fixture writes passed all 9 original tests. No test was skipped.
 
 ## Donor archival decision: NO-GO
 
-Keep both donor repositories active until the three METODAX PRs are reviewed
-and merged, OntoHistoCurator's immutable-ingest commit is available on its
+Keep both donor repositories active until the four METODAX PRs are reviewed
+and merged, the integrated `main` CI (including cross-repository qualification)
+passes, OntoHistoCurator's immutable-ingest commit is available on its
 default branch or in a release, and the source/licence record for SAS is
 resolved. The SAS donor commit has no license file; METODAX records attribution
 but this report does not infer a licence grant. The qualification tests use the
@@ -45,6 +46,31 @@ unmerged OntoHistoCurator branch commit, so they do not establish the same
 immutable-ID behavior for `main` at `199ef02`.
 
 Neither donor repository was modified or archived. No PR was merged.
+
+## HCMO semantic refinement
+
+HCMO v0.4.1 was inspected at tag commit `9503ae4827525d3c82cb0a2cc56a1ce52da39159`.
+The pilot now separates source-linked extraction from optional term suggestions
+and no longer emits abstract-derived graph triples or synthetic missingness
+assertions. Six qualification tests include real MAPPPP validation of optional
+HCMO suggestions and a pilot-report-to-exporter round trip. The exact concept
+and constraint comparison is in `examples/hcm/HCMO_REVIEW.md`.
+
+## Integration gate update — 2026-10-23
+
+PR #1's GitHub CI passed Python 3.10, 3.11, and 3.12 after all Ruff findings
+were fixed. PR #2's three matrix jobs also passed. PR #3 adds a pinned
+OntoHistoCurator qualification job to the same workflow, which also runs on
+pushes to `main`. Because OntoHistoCurator is private and its organization
+disables deploy keys, that job requires a GitHub App installed for that
+repository with `contents: read`, plus the
+`ONTOHISTOCURATOR_READ_APP_CLIENT_ID` METODAX variable and
+`ONTOHISTOCURATOR_READ_APP_PRIVATE_KEY` Actions secret. It fails at the
+explicit credential check until these are configured. All six
+qualification tests passed locally against the pinned commit. No PR or donor
+repository has been merged or archived.
+
+_Superseded on 2026-10-26: the GitHub App approach was dropped; see below._
 
 ## Manual/offline qualification — 2026-10-26
 

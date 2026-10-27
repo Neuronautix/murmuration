@@ -28,6 +28,7 @@ from automation.exporters.mapppp import (
     ReviewNote,
     StudyContext,
 )
+from automation.hcmo_suggestions import HCMO_SOURCE, suggest_hcmo_mappings
 
 HCM_PILOT_MATRIX_HEADER = """# HCMSAS Knowledge Traceability Matrix
 
@@ -203,13 +204,13 @@ def _extract_strain(text: str) -> str | None:
 
 def _extract_sex(text: str) -> str | None:
     lowered = text.lower()
-    if "male and female" in lowered:
+    if re.search(r"\b(male and female|female and male|both sexes)\b", lowered):
         return "male_and_female"
-    if "female" in lowered and "male" in lowered:
+    if re.search(r"\bfemales?\b", lowered) and re.search(r"\bmales?\b", lowered):
         return "male_and_female"
-    if "female" in lowered:
+    if re.search(r"\bfemales?\b", lowered):
         return "female"
-    if "male" in lowered:
+    if re.search(r"\bmales?\b", lowered):
         return "male"
     return None
 
@@ -264,6 +265,9 @@ def _extract_monitoring_duration(text: str) -> str | None:
 
 
 def _extract_light_dark_schedule(text: str) -> str | None:
+    timing = re.search(r"\b\d{1,2}\s*[:/]\s*\d{1,2}\s*(?:h(?:ours?)?\s*)?(?:light[- /]dark|L\s*[:/]\s*D)\b", text, re.I)
+    if timing:
+        return _normalise_value(timing.group(0))
     lowered = text.lower()
     terms = []
     if "light/dark" in lowered:
@@ -277,6 +281,16 @@ def _extract_light_dark_schedule(text: str) -> str | None:
     if "light phase" in lowered:
         terms.append("light_phase_reported")
     return "; ".join(dict.fromkeys(terms)) if terms else None
+
+
+def _extract_sensor_modality(text: str) -> str | None:
+    match = re.search(r"\b(infrared|capacitive|video|camera)\s+(?:sensor|sensing|tracking)\b", text, re.I)
+    return _normalise_value(match.group(0).lower()) if match else None
+
+
+def _extract_software_version(text: str) -> str | None:
+    match = re.search(r"\b(?:classifier|software)\s+version\s+[A-Za-z0-9._-]+\b", text, re.I)
+    return _normalise_value(match.group(0)) if match else None
 
 
 def _extract_housing_specifics(text: str) -> str | None:
@@ -421,6 +435,8 @@ def _build_metadata_and_evidence(papers: list[CachedPaper], created_at: str) -> 
         _maybe_add_metadata(metadata_assertions, assertion_id=f"metadata-{paper.pmid}-lightdark", field="light_dark_schedule", value=_extract_light_dark_schedule(title_blob), provenance=provenance)
         _maybe_add_metadata(metadata_assertions, assertion_id=f"metadata-{paper.pmid}-housing-specifics", field="housing_specifics", value=_extract_housing_specifics(title_blob), provenance=provenance)
         _maybe_add_metadata(metadata_assertions, assertion_id=f"metadata-{paper.pmid}-activity-metric", field="activity_metric_definition", value=_extract_activity_metric_definition(title_blob), provenance=provenance)
+        _maybe_add_metadata(metadata_assertions, assertion_id=f"metadata-{paper.pmid}-sensor-modality", field="sensor_modality", value=_extract_sensor_modality(title_blob), provenance=provenance)
+        _maybe_add_metadata(metadata_assertions, assertion_id=f"metadata-{paper.pmid}-software-version", field="software_version", value=_extract_software_version(title_blob), provenance=provenance)
 
         for index, sentence in enumerate(_claim_sentences(paper), start=1):
             evidence_assertions.append(
@@ -434,122 +450,16 @@ def _build_metadata_and_evidence(papers: list[CachedPaper], created_at: str) -> 
                 ).model_dump(mode="json")
             )
 
-    # Deterministic corpus-level missingness assertions.
-    fallback_paper = papers[0]
-    corpus_provenance = _paper_provenance(fallback_paper, "Metadata Architect", created_at)
-    metadata_assertions.extend(
-        [
-            MetadataAssertion(
-                assertion_id="metadata-corpus-light-cycle",
-                epistemic_label="uncertain",
-                provenance=corpus_provenance,
-                field="light_cycle_parameters",
-                value="not consistently reported in abstract-level seed corpus",
-            ).model_dump(mode="json"),
-            MetadataAssertion(
-                assertion_id="metadata-corpus-processing-details",
-                epistemic_label="uncertain",
-                provenance=corpus_provenance,
-                field="processing_and_analysis_details",
-                value="not consistently reported in abstract-level seed corpus",
-            ).model_dump(mode="json"),
-        ]
-    )
     return {
         "metadata_assertions": metadata_assertions,
         "evidence_assertions": evidence_assertions,
     }
 
 
-_MAPPING_TABLE = {
-    "species": ("MNMS", "animal_characteristics", "species is required to interpret reuse eligibility", 0.95),
-    "endpoint": ("MNMS", "behavioral_endpoints", "locomotor activity is the core endpoint under study", 0.9),
-    "temporal_structure": ("MNMS", "temporal_structure", "circadian interpretation depends on temporal structure", 0.9),
-    "housing_context": ("MNMS", "housing_and_cage_context", "group housing changes locomotor interpretation", 0.85),
-    "monitoring_platform": ("MNMS", "acquisition_system", "platform and sensor stack affect comparability", 0.9),
-    "strain": ("MNMS", "animal_characteristics", "strain can affect circadian and locomotor baseline behavior", 0.9),
-    "sex": ("MNMS", "animal_characteristics", "sex differences were reported in the seed corpus", 0.9),
-    "age": ("MNMS", "animal_characteristics", "age changes locomotor and circadian interpretation", 0.85),
-    "genotype_or_model": ("MNMS", "study_design_and_model", "disease model or genotype constrains reuse comparability", 0.9),
-    "monitoring_duration": ("MNMS", "temporal_structure", "monitoring duration affects longitudinal interpretation", 0.8),
-    "light_dark_schedule": ("MNMS", "environmental_conditions", "light-dark schedule is central to circadian interpretation", 0.95),
-    "housing_specifics": ("MNMS", "housing_and_cage_context", "housing specifics alter activity output", 0.85),
-    "activity_metric_definition": ("MNMS", "behavioral_endpoints", "activity metric definition determines what is being reused", 0.9),
-    "light_cycle_parameters": ("MNMS", "environmental_conditions", "light cycle is required for circadian reuse", 0.7),
-    "processing_and_analysis_details": ("MNMS", "software_and_classifier", "processing details remain necessary even in locomotor-focused HCM studies", 0.7),
-}
-
-
-def _build_mapping_and_graph(papers: list[CachedPaper], metadata_assertions: list[dict[str, Any]], created_at: str) -> dict[str, Any]:
-    mapping_assertions: list[dict[str, Any]] = []
-    graph_assertions: list[dict[str, Any]] = []
-
-    for item in metadata_assertions:
-        field = item["field"]
-        if field not in _MAPPING_TABLE:
-            continue
-        target_schema, target_field, rationale, confidence = _MAPPING_TABLE[field]
-        mapping_assertions.append(
-            MappingAssertion(
-                assertion_id=f"mapping-{item['assertion_id']}",
-                epistemic_label="normalized" if item["epistemic_label"] == "reported" else item["epistemic_label"],
-                provenance=Provenance.model_validate(item["provenance"]),
-                local_field=field,
-                target_schema=target_schema,
-                target_field=target_field,
-                mapping_rationale=rationale,
-                confidence=confidence,
-            ).model_dump(mode="json")
-        )
-
-    for paper in papers:
-        provenance = _paper_provenance(paper, "Knowledge Graph Engineer", created_at)
-        graph_assertions.append(
-            GraphAssertion(
-                assertion_id=f"graph-{paper.pmid}-species",
-                epistemic_label="normalized",
-                provenance=provenance,
-                subject=f"Study_{paper.pmid}",
-                predicate="has_species",
-                object="mouse",
-                object_type="species",
-            ).model_dump(mode="json")
-        )
-        if _contains(f"{paper.title} {paper.abstract}", "digital ventilated cage"):
-            graph_assertions.append(
-                GraphAssertion(
-                    assertion_id=f"graph-{paper.pmid}-platform",
-                    epistemic_label="reported",
-                    provenance=provenance,
-                    subject=f"Study_{paper.pmid}",
-                    predicate="uses_system",
-                    object="HCM_System_DVC",
-                    object_type="HCM_System",
-                ).model_dump(mode="json")
-            )
-        if _contains(f"{paper.title} {paper.abstract}", "circadian"):
-            graph_assertions.append(
-                GraphAssertion(
-                    assertion_id=f"graph-{paper.pmid}-circadian",
-                    epistemic_label="reported",
-                    provenance=provenance,
-                    subject=f"Study_{paper.pmid}",
-                    predicate="measures",
-                    object="circadian_locomotor_activity",
-                    object_type="endpoint",
-                ).model_dump(mode="json")
-            )
-
-    return {
-        "mapping_assertions": mapping_assertions,
-        "graph_assertions": graph_assertions,
-    }
-
-
 def _build_review_notes(
+    papers: list[CachedPaper],
     metadata_assertions: list[dict[str, Any]],
-    mapping_assertions: list[dict[str, Any]],
-    graph_assertions: list[dict[str, Any]],
+    evidence_assertions: list[dict[str, Any]],
     created_at: str,
 ) -> dict[str, Any]:
     provenance = Provenance(
@@ -562,22 +472,21 @@ def _build_review_notes(
         ReviewNote(
             note_id="review-note-light-cycle",
             disposition="flag",
-            note="Light-cycle parameters are not consistently recoverable from the fixed seed abstracts and should be treated as mandatory metadata before MNMS-style reuse.",
+            note="Explicit light-cycle timing was not consistently extracted from the seed abstracts. Inspect full methods before any ontology or reuse decision; this is not a conformance finding.",
             provenance=provenance,
-            related_assertion_ids=[item["assertion_id"] for item in metadata_assertions if item["field"] == "light_cycle_parameters"],
+            related_assertion_ids=[item["assertion_id"] for item in metadata_assertions if item["field"] == "light_dark_schedule"],
         ).model_dump(mode="json"),
         ReviewNote(
             note_id="review-note-processing-details",
             disposition="request_changes",
-            note="Processing and analysis details are not consistently reported at abstract level and require explicit recovery before cross-study comparison.",
+            note="Software and processing details were not consistently extracted at abstract level. Inspect full methods before comparing studies; no compliance status is inferred.",
             provenance=provenance,
-            related_assertion_ids=[item["assertion_id"] for item in mapping_assertions if item["local_field"] == "processing_and_analysis_details"]
-            + [item["assertion_id"] for item in graph_assertions if item["predicate"] == "uses_system"],
+            related_assertion_ids=[item["assertion_id"] for item in metadata_assertions if item["field"] == "software_version"],
         ).model_dump(mode="json"),
         ReviewNote(
             note_id="review-note-sex-and-age",
             disposition="flag",
-            note="Sex and age are not uniformly available across the fixed corpus and should be curator-checked before any MNMS-style reuse decision.",
+            note="Sex and age are not uniformly extracted from the seed abstracts; inspect source methods before reuse decisions.",
             provenance=provenance,
             related_assertion_ids=[
                 item["assertion_id"]
@@ -597,6 +506,29 @@ def _build_review_notes(
             ],
         ).model_dump(mode="json"),
     ]
+    for paper in papers:
+        field_set = {item["field"] for item in metadata_assertions
+                     if item["provenance"]["source_id"] == _paper_source_id(paper)}
+        linked = [item["assertion_id"] for item in evidence_assertions
+                  if item["provenance"]["source_id"] == _paper_source_id(paper)]
+        if "light_dark_schedule" not in field_set or not any(
+            re.search(r"\b\d+\s*[:/]\s*\d+\b", str(item["value"]))
+            for item in metadata_assertions
+            if item["field"] == "light_dark_schedule" and item["provenance"]["source_id"] == _paper_source_id(paper)
+        ):
+            review_notes.append(ReviewNote(
+                note_id=f"review-{paper.pmid}-light-timing", disposition="flag",
+                note="No explicit light/dark phase timing was extracted from this abstract; inspect full methods. No HCMO conformance judgment is made.",
+                provenance=_paper_provenance(paper, "Reproducibility and Bias Auditor", created_at),
+                related_assertion_ids=linked,
+            ).model_dump(mode="json"))
+        if "software_version" not in field_set:
+            review_notes.append(ReviewNote(
+                note_id=f"review-{paper.pmid}-software-version", disposition="comment",
+                note="No software or classifier version was extracted from this abstract; inspect full methods before comparison.",
+                provenance=_paper_provenance(paper, "Reproducibility and Bias Auditor", created_at),
+                related_assertion_ids=linked,
+            ).model_dump(mode="json"))
     return {"review_notes": review_notes}
 
 
@@ -617,22 +549,18 @@ def _build_final_draft(
     review_notes: list[dict[str, Any]],
 ) -> str:
     metadata_lines = "\n".join(
-        f"- [FACT] `{item['field']}`: {item['value']}" if item["epistemic_label"] == "reported"
-        else f"- [CONTESTED] `{item['field']}`: {item['value']}"
-        for item in metadata_assertions
-    )
+        f"- [MISSING] {item['note']} Source: {item['provenance']['source_id']}."
+        for item in review_notes if item["note_id"].startswith("review-")
+    ) or "No source-specific abstract extraction gaps were flagged."
     evidence_table = "\n".join(
-        f"| {item['subject']} | {item['observation']} | {item['value']} |"
+        f"| {item['subject']} | {item['observation']} | {item['provenance']['source_id']} |"
         for index, item in enumerate(evidence_assertions, start=1)
     )
     mapping_table = "\n".join(
-        f"| {item['local_field']} | {item['target_field']} | {item['mapping_rationale']} | {item['confidence']} |"
+        f"| {item['local_field']} | {item['target_schema']} | {item['target_field']} | {item['provenance']['source_id']} |"
         for item in mapping_assertions
     )
-    graph_table = "\n".join(
-        f"| {item['subject']} | {item['predicate']} | {item['object']} |"
-        for item in graph_assertions
-    )
+    graph_table = "No graph relations are minted from abstract-only text. Curators may propose them after source and ontology review."
     risk_table = "\n".join(
         f"| {item['note_id']} | {item['disposition']} | {item['note']} |"
         for item in review_notes
@@ -645,21 +573,19 @@ Pilot `{spec.pilot_name}` addresses the question: {spec.research_question}
 This deterministic HCM pilot uses only the fixed seed corpus PMIDs {', '.join(spec.pmids)} and does not expand beyond those papers.
 
 ## C. Evidence table with in-text citations
-| study | claim | supporting detail |
+| study | claim | stable source ID |
 |---|---|---|
 {evidence_table}
 
-## D. HCM MNMS mapping table
-| metadata_field | MNMS_category | rationale | confidence |
+## D. Optional HCMO 0.4.1 term suggestions
+| metadata_field | target_schema | target_field | source_id |
 |---|---|---|---|
-{mapping_table}
+{mapping_table or 'No ontology suggestions requested or supported by the extracted evidence.'}
 
 ## E. Missing metadata and ambiguity report
 {metadata_lines}
 
 ## F. Knowledge graph schema proposal
-| subject | predicate | object |
-|---|---|---|
 {graph_table}
 
 ## G. Reproducibility and comparability risks
@@ -668,7 +594,7 @@ This deterministic HCM pilot uses only the fixed seed corpus PMIDs {', '.join(sp
 {risk_table}
 
 ## H. Conservative conclusions
-[INFERENCE] The fixed seed corpus supports core metadata, evidence, mapping, graph, and review-note generation, but MNMS-style reuse remains constrained by missing light-cycle, processing-detail, and comparability metadata.
+[INFERENCE] The fixed PMID corpus supports source-linked text and metadata proposals. Abstract-level gaps require full-method review; neither HCMO nor MNMS conformance is assessed here.
 
 ## I. References
 {references}
@@ -723,6 +649,7 @@ def run_hcm_pilot(
     *,
     refresh_cache: bool = False,
     refresh_intermediates: bool = False,
+    suggest_hcmo: bool = False,
 ) -> dict[str, Path]:
     spec = _load_pilot_spec(spec_path)
     root = Path(output_root) if output_root else Path.cwd() / "Drafts" / "hcm_pilot" / _slugify(spec.pilot_name)
@@ -740,26 +667,23 @@ def run_hcm_pilot(
     manifest.corpus_digest = fingerprint
 
     metadata_evidence = _load_or_build_json(
-        intermediates_dir / "metadata_evidence.json",
+        intermediates_dir / "metadata_evidence_v3.json",
         refresh_intermediates,
         lambda: _build_metadata_and_evidence(papers, manifest.created_at),
     )
-    mapping_graph = _load_or_build_json(
-        intermediates_dir / "mapping_graph.json",
-        refresh_intermediates,
-        lambda: _build_mapping_and_graph(
-            papers,
-            metadata_evidence["metadata_assertions"],
-            manifest.created_at,
-        ),
-    )
+    coverage = suggest_hcmo_mappings(metadata_evidence["metadata_assertions"])
+    coverage["suggestions_enabled"] = suggest_hcmo
+    coverage_path = root / "hcmo_coverage.json"
+    _write_json(coverage_path, coverage)
+    mapping_assertions = coverage["mappings"] if suggest_hcmo else []
+    graph_assertions: list[dict[str, Any]] = []
     review_payload = _load_or_build_json(
-        intermediates_dir / "review_notes.json",
+        intermediates_dir / "review_notes_v3.json",
         refresh_intermediates,
         lambda: _build_review_notes(
+            papers,
             metadata_evidence["metadata_assertions"],
-            mapping_graph["mapping_assertions"],
-            mapping_graph["graph_assertions"],
+            metadata_evidence["evidence_assertions"],
             manifest.created_at,
         ),
     )
@@ -769,8 +693,8 @@ def run_hcm_pilot(
         papers,
         metadata_evidence["metadata_assertions"],
         metadata_evidence["evidence_assertions"],
-        mapping_graph["mapping_assertions"],
-        mapping_graph["graph_assertions"],
+        mapping_assertions,
+        graph_assertions,
         review_payload["review_notes"],
     )
     draft_path = drafts_dir / "final_report.md"
@@ -790,14 +714,17 @@ def run_hcm_pilot(
             created_at=manifest.created_at,
             created_by="automation.hcm_pilot.run_hcm_pilot",
         ),
-        study_context=StudyContext(species="mouse"),
+        study_context=StudyContext(species="mouse") if any(
+            item["field"] == "species" and item["value"] == "mouse"
+            for item in metadata_evidence["metadata_assertions"]
+        ) else None,
         sources=[{"source_id": _paper_source_id(paper), "source_type": "paper", "title": paper.title}
                  for paper in papers] + [{"source_id": "seed_corpus", "source_type": "note",
-                                          "title": "Fixed PMID seed corpus"}],
+                                          "title": "Fixed PMID seed corpus"}] + ([HCMO_SOURCE] if suggest_hcmo else []),
         metadata_assertions=[MetadataAssertion.model_validate(item) for item in metadata_evidence["metadata_assertions"]],
         evidence_assertions=[EvidenceAssertion.model_validate(item) for item in metadata_evidence["evidence_assertions"]],
-        mapping_assertions=[MappingAssertion.model_validate(item) for item in mapping_graph["mapping_assertions"]],
-        graph_assertions=[GraphAssertion.model_validate(item) for item in mapping_graph["graph_assertions"]],
+        mapping_assertions=[MappingAssertion.model_validate(item) for item in mapping_assertions],
+        graph_assertions=[GraphAssertion.model_validate(item) for item in graph_assertions],
         review_notes=[ReviewNote.model_validate(item) for item in review_payload["review_notes"]],
     )
     identity = content_package_id(bundle.model_dump(mode="json", exclude_none=True), _slugify(spec.pilot_name))
@@ -815,4 +742,5 @@ def run_hcm_pilot(
         "bundle": bundle_path,
         "cache_dir": cache_dir,
         "intermediates_dir": intermediates_dir,
+        "coverage": coverage_path,
     }
