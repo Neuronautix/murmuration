@@ -50,25 +50,24 @@ Human-in-the-Loop (HITL)
   the user, and resumes with Command(resume=answer).
 """
 
-import asyncio
 from typing import Annotated, TypedDict
 
-from pydantic import BaseModel
-from langgraph.graph import StateGraph, END, START
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
-from langgraph.types import Send, interrupt, Command  # noqa: F401 (Command re-exported for main.py)
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.prebuilt import ToolNode
+from langgraph.types import Command, Send, interrupt  # noqa: F401 (Command re-exported for main.py)
+from pydantic import BaseModel
 
 from automation.config import (
-    load_config,
+    build_agent_system_prompt,
+    build_reviewer_prompt,
     create_model,
     create_reviewer_model,
-    build_reviewer_prompt,
-    get_persona_config,
-    load_tools_for_persona,
-    build_agent_system_prompt,
     get_hitl_config,
+    get_persona_config,
+    load_config,
+    load_tools_for_persona,
 )
 
 # Characters retained from each peer agent's output when shown to another
