@@ -61,3 +61,20 @@ def test_retry_after_revision_keeps_package_id(tmp_path):
     assert retry.model_dump(mode="json") == first.model_dump(mode="json")
     registry = json.loads((draft.parent / "source_registry.json").read_text(encoding="utf-8"))
     assert len(registry["sources"]) > len(retry.sources)
+
+
+def test_superseded_row_does_not_bind_citations(tmp_path):
+    """A superseded row citing [1] with an old source must not block or steer the export."""
+    config, matrix, draft, notes = _write_hcm_fixture_files(tmp_path)
+    active = ("| HCM-001 | Continuous cage-side HCM can capture circadian locomotor activity in mice [1] "
+              "| [FACT] | DOI:10.1000/hcm.methods.2024 |")
+    text = matrix.read_text(encoding="utf-8")
+    assert active in text
+    stale = ("| HCM-001a | Continuous cage-side HCM can capture circadian locomotor activity in mice [1] "
+             "| [FACT] | DOI:10.1000/hcm.methods.2023 | Metadata Architect | temporal_structure "
+             "| Wrong DOI, replaced by HCM-001. | superseded |\n")
+    matrix.write_text(text.replace(active, stale + active), encoding="utf-8")
+    bundle = export_hcm_mapppp_bundle(config, draft, matrix, notes)
+    source_ids = {source["source_id"] for source in bundle.sources}
+    assert "DOI:10.1000/hcm.methods.2024" in source_ids
+    assert "DOI:10.1000/hcm.methods.2023" not in source_ids

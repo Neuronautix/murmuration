@@ -429,6 +429,8 @@ def export_hcm_mapppp_bundle(
     )
     traceability_rows = _load_traceability_rows(traceability_matrix_path)
     for row in traceability_rows:
+        if row.get("status", "").lower() == "superseded":
+            continue
         stable_source = (row.get("source") or "").strip()
         if stable_source and not stable_source.startswith("["):
             for marker in _extract_citations(row.get("claim", "") + " " + row.get("notes", "")):
