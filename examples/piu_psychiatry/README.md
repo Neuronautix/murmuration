@@ -2,7 +2,7 @@
 
 This folder contains a complete, ready-to-use swarm configuration for **psychiatric research on problematic internet use (PIU)**, including internet gaming disorder (IGD), social media disorder, and smartphone overuse.
 
-It serves as a reference implementation of the Research Swarm framework for a domain that requires high diagnostic caution, careful construct disambiguation, and multi-disciplinary synthesis.
+It serves as a reference implementation of the Murmuration framework for a domain that requires high diagnostic caution, careful construct disambiguation, and multi-disciplinary synthesis.
 
 ## How to Use This Example
 
