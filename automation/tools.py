@@ -157,6 +157,7 @@ def search_pubmed(query: str, max_results: int = 3) -> str:
                 "retmode": "json",
                 "retmax": max_results,
             },
+            timeout=20,
         )
         search_resp.raise_for_status()
         id_list = search_resp.json().get("esearchresult", {}).get("idlist", [])
@@ -175,6 +176,7 @@ def search_pubmed(query: str, max_results: int = 3) -> str:
                 "rettype": "abstract",
                 "retmode": "xml",
             },
+            timeout=20,
         )
         fetch_resp.raise_for_status()
 
@@ -558,6 +560,11 @@ def write_manuscript_section(section_name: str, content: str) -> str:
 _MATRIX_HEADER_SENTINEL = "| Source |"  # first cell of the expected table header
 
 
+def _md_cell(value) -> str:
+    """Make a value safe for a single Markdown table cell (no row/column breaks)."""
+    return " ".join(str(value).split()).replace("|", "\\|")
+
+
 @tool
 def append_traceability_matrix(fact: str, source: str, epistemic_tag: str) -> str:
     """Logs a documented fact and its source into the Knowledge Traceability Matrix.
@@ -596,9 +603,9 @@ def append_traceability_matrix(fact: str, source: str, epistemic_tag: str) -> st
 
     try:
         new_row = (
-            f"| *Live Search:* {source} | **Auto-Agent** | "
-            f"{fact} | Automatically sourced and summarized via Tool API. | "
-            f"**{epistemic_tag}** |\n"
+            f"| *Live Search:* {_md_cell(source)} | **Auto-Agent** | "
+            f"{_md_cell(fact)} | Automatically sourced and summarized via Tool API. | "
+            f"**{_md_cell(epistemic_tag)}** |\n"
         )
         with open(filepath, "a", encoding="utf-8") as f:
             f.write(new_row)

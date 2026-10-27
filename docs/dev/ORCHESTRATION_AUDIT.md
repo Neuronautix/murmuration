@@ -12,7 +12,24 @@ the marker must be removed. Anything not reproduced is marked **unverified**.
 `agents/*/persona.md` — is treated as binding. Every proposal says whether it is a
 pure code fix (behaviour-preserving for users) or needs a new config key.
 
-No code was changed by this audit. Only this document and the test file were added.
+No code was changed by the audit itself. The quick-win pass (§6) was applied in a follow-up
+commit; see **Status** below.
+
+### Status
+
+Fixed in the quick-win pass: **B1, B3, B6, B7, B8, B9, B10, B12, R4, R7, R8, R11, R12
+(logged), R13 (logged), R14, R15**. Their tests in `tests/test_orchestration.py` now run as
+plain regression tests. B11 was left out: `doctor` already *warns when the orchestrator has
+no discovery tools*, so a second warning that its tools are ignored would contradict it; the
+right fix is the bounded orchestrator tool loop in recommendation 1's follow-up, or removing
+the tools from the orchestrator persona in the templates. The `langgraph>=1.0` floor was not
+bumped because `main` now pins `langchain-core<1`; `handle_tool_errors=True` gives the same
+behaviour on every supported version.
+
+Still open (strict `xfail` tests remain): **B2** (Journalist brief in config), **B4** (tool
+rounds exhausted → empty output), **B5** (HITL replays LLM calls), **R1** (findings
+overwritten on re-dispatch), **R3** (one failed branch aborts the run), plus the design items
+I1–I6 and R2, R5, R6, R9, R10.
 
 ---
 

@@ -50,6 +50,7 @@ Human-in-the-Loop (HITL)
   the user, and resumes with Command(resume=answer).
 """
 
+import re
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -72,7 +73,16 @@ from automation.config import (
 
 # Characters retained from each peer agent's output when shown to another
 # specialist. Keeps cross-agent context lean without losing key facts.
+# Override with orchestrator.max_peer_chars in swarm_config.yml.
 MAX_PEER_CHARS = 600
+
+# Characters retained from each specialist's output in the orchestrator's
+# routing prompt. Override with orchestrator.max_findings_chars.
+MAX_FINDINGS_CHARS = 1500
+
+# Reviewer verdicts: the prompt asks for a bare 'APPROVED', but models often
+# wrap it ('**APPROVED**', 'APPROVED.'). Rejections start with 'REJECTED:'.
+_APPROVED_RE = re.compile(r"^\W*APPROVED\b")
 
 
 # ── State ──────────────────────────────────────────────────────────────────
@@ -108,8 +118,8 @@ class GraphState(TypedDict):
     task: str
     messages: Annotated[list, add_messages]
     agent_outputs: Annotated[dict, _merge_agent_outputs]
-    agent_assignments: Annotated[dict, _merge_agent_outputs]   # per-agent instructions
-    next_agents: list          # list[str]: specialist names | ["Journalist"] | ["END"]
+    agent_assignments: dict    # per-agent instructions; replaced on every orchestrator pass
+    next_agents: list          # list[str]: specialist names | ["Journalist"]
     next_instructions: str     # fallback shared instructions
     agent_call_count: int      # only incremented for specialist dispatches
     reviewer_approved: bool
@@ -176,7 +186,7 @@ def _run_tool_loop(model, tools: list, messages: list, max_rounds: int):
 
     Returns (final_response, accumulated_token_usage).
     """
-    tool_executor = ToolNode(tools)
+    tool_executor = ToolNode(tools, handle_tool_errors=True)
     response = None
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     for _ in range(max_rounds):
@@ -202,7 +212,7 @@ async def _run_tool_loop_async(model, tools: list, messages: list, max_rounds: i
 
     Returns (final_response, accumulated_token_usage).
     """
-    tool_executor = ToolNode(tools)
+    tool_executor = ToolNode(tools, handle_tool_errors=True)
     response = None
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     for _ in range(max_rounds):
@@ -218,6 +228,60 @@ async def _run_tool_loop_async(model, tools: list, messages: list, max_rounds: i
     return response, usage
 
 
+def _unpack_routing_result(result) -> tuple:
+    """Normalise the structured-output routing call to (decision, token_usage).
+
+    With ``with_structured_output(..., include_raw=True)`` the model returns
+    ``{"raw": AIMessage, "parsed": OrchestratorDecision, "parsing_error": ...}``,
+    which lets us count the orchestrator's tokens. A bare decision object (older
+    call sites, tests) is accepted too and counted as zero tokens.
+    """
+    if isinstance(result, dict) and "parsed" in result:
+        if result.get("parsing_error") is not None or result["parsed"] is None:
+            raise ValueError(
+                f"Orchestrator returned an unparseable routing decision: {result.get('parsing_error')}"
+            )
+        return result["parsed"], _extract_token_usage(result.get("raw"))
+    return result, _extract_token_usage(result)
+
+
+def _parse_plan_override(answer: str, known_names: list) -> tuple:
+    """Parse a HITL post_plan reply into (agent_names, free_text).
+
+    Agent names must be given exactly (case-insensitive), separated by commas,
+    semicolons or newlines. Anything that is not an exact name is returned as
+    free text so it can be appended to the instructions instead of being
+    silently dropped or, worse, substring-matched.
+    """
+    lookup = {name.lower(): name for name in known_names}
+    agents, leftovers = [], []
+    for token in re.split(r"[,;\n]+", answer):
+        token = token.strip().strip(".")
+        if not token:
+            continue
+        match = lookup.get(token.lower())
+        if match and match not in agents:
+            agents.append(match)
+        else:
+            leftovers.append(token)
+    return agents, ", ".join(leftovers)
+
+
+def compute_recursion_limit(config: dict) -> int:
+    """Upper bound on graph steps implied by the configured safety valves.
+
+    Worst case: every specialist dispatch is sequential (orchestrator + specialist
+    = 2 steps each), one safety-valve routing step, the Journalist, and a full
+    set of reviewer rejections (Journalist + reviewer per loop, plus the final
+    force-approval). A small margin covers HITL resume bookkeeping.
+    """
+    orch = config.get("orchestrator", {})
+    rev = config.get("reviewer", {})
+    max_calls = max(1, int(orch.get("max_agent_calls", 8)))
+    max_rev = max(0, int(rev.get("max_revision_loops", 3))) if rev.get("enabled", True) else 0
+    return 2 * max_calls + 2 * (max_rev + 1) + 4
+
+
 # ── Orchestrator node (Dr. Nexus) ──────────────────────────────────────────
 
 def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
@@ -231,8 +295,11 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
     nexus_cfg = get_persona_config(config, config["orchestrator"]["agent"])
     system_prompt = build_agent_system_prompt(nexus_cfg)
     max_calls = config["orchestrator"].get("max_agent_calls", 8)
+    max_findings_chars = config["orchestrator"].get("max_findings_chars", MAX_FINDINGS_CHARS)
     journalist_name = config["orchestrator"]["journalist"]
-    valid_targets = set(specialist_names) | {journalist_name, "Journalist", "END"}
+    # 'END' is deliberately not a target: the orchestrator never runs after the
+    # Journalist, so the only way to finish a run is to route to the Journalist.
+    valid_targets = set(specialist_names) | {journalist_name, "Journalist"}
     specialist_set = set(specialist_names)
 
     hitl_on = hitl_cfg.get("enabled", False)
@@ -257,7 +324,9 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
                 "token_usage": {},
             }
 
-        findings = _format_findings(state.get("agent_outputs", {}))
+        findings = _format_findings(
+            state.get("agent_outputs", {}), compress=True, max_chars=max_findings_chars,
+        )
         consulted_note = (
             f"SPECIALISTS ALREADY CONSULTED: {', '.join(already_consulted)}"
             if already_consulted else "No specialists consulted yet."
@@ -274,21 +343,20 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             "    When routing multiple specialists, populate `assignments` with a specific\n"
             "    `instructions` string for EACH agent.\n"
             "  • Route to ['Journalist'] when sufficient evidence is ready to write.\n"
-            "  • Route to ['END'] only after the Journalist has already produced output.\n"
             "  • Do NOT re-route to a specialist already in ALREADY CONSULTED unless a\n"
             "    specific new sub-question requires it.\n"
             "Return: reasoning, next_agents (list), instructions (single-agent fallback),\n"
             "assignments (list of {agent, instructions} for parallel dispatch)."
         )
 
-        decision = routing_model.invoke([
+        decision, round_usage = _unpack_routing_result(routing_model.invoke([
             SystemMessage(content=system_prompt),
             HumanMessage(content=routing_prompt),
-        ])
-        round_usage = _extract_token_usage(decision)
+        ]))
 
         valid_next = ["Journalist" if t == journalist_name else t
                       for t in decision.next_agents if t in valid_targets]
+        ignored_targets = [t for t in decision.next_agents if t not in valid_targets]
         if not valid_next:
             valid_next = ["Journalist"]
 
@@ -298,6 +366,8 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             for a in (decision.assignments or [])
             if a.agent in valid_targets
         }
+
+        user_redirect = ""
 
         # ── HITL: post_plan ───────────────────────────────────────────────
         # Pause on the *first* orchestrator call to let the user approve or
@@ -316,19 +386,22 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             })
             answer = (answer or "APPROVE").strip()
             if answer.upper() != "APPROVE" and answer:
-                # Try to match known agent names in the user's reply
-                override_agents = [
-                    a for a in list(specialist_set) + ["Journalist", "END"]
-                    if a.lower() in answer.lower()
-                ]
+                override_agents, redirect_text = _parse_plan_override(
+                    answer, specialist_names + ["Journalist", journalist_name],
+                )
+                override_agents = ["Journalist" if a == journalist_name else a for a in override_agents]
                 if override_agents:
-                    valid_next = override_agents
+                    valid_next = list(dict.fromkeys(override_agents))
                     specialist_dispatches = [t for t in valid_next if t in specialist_set]
                     assignments_dict = {}
+                if redirect_text:
+                    user_redirect = redirect_text
 
         # ── HITL: pre_journalist ──────────────────────────────────────────
         # Let the user add final framing constraints before the Journalist writes.
         final_instructions = decision.instructions
+        if user_redirect:
+            final_instructions = final_instructions + "\n\nUSER REDIRECT: " + user_redirect
         if hitl_on and "pre_journalist" in hitl_checkpoints and "Journalist" in valid_next:
             answer = interrupt({
                 "checkpoint": "pre_journalist",
@@ -340,7 +413,14 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
                 "default": "",
             })
             if answer and answer.strip():
-                final_instructions = decision.instructions + "\n\nUSER FRAMING: " + answer.strip()
+                final_instructions = final_instructions + "\n\nUSER FRAMING: " + answer.strip()
+
+        routing_notes = []
+        if ignored_targets:
+            routing_notes.append(f"ignored unknown targets {ignored_targets}")
+        if specialist_dispatches and "Journalist" in valid_next:
+            routing_notes.append("Journalist deferred until the specialists return")
+        notes = f" [{'; '.join(routing_notes)}]" if routing_notes else ""
 
         return {
             "next_agents": valid_next,
@@ -348,7 +428,7 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             "agent_assignments": assignments_dict,
             "agent_call_count": call_count + len(specialist_dispatches),
             "messages": [AIMessage(content=(
-                f"[Orchestrator → {valid_next}]: {decision.reasoning}"
+                f"[Orchestrator → {valid_next}]: {decision.reasoning}{notes}"
             ))],
             "token_usage": round_usage,
         }
@@ -370,8 +450,10 @@ def make_specialist_node(persona_name: str, config: dict, model, tools: list):
     system_prompt = build_agent_system_prompt(
         persona_cfg,
         epistemic_tags=config.get("epistemic_tags"),
+        tool_names=[getattr(t, "name", "") for t in tools],
     )
     max_rounds = config["orchestrator"].get("max_tool_rounds_per_agent", 5)
+    max_peer_chars = config["orchestrator"].get("max_peer_chars", MAX_PEER_CHARS)
 
     async def specialist_node(state: GraphState):
         agent_instructions = (
@@ -383,6 +465,7 @@ def make_specialist_node(persona_name: str, config: dict, model, tools: list):
             state.get("agent_outputs", {}),
             compress=True,
             exclude=persona_name,
+            max_chars=max_peer_chars,
         )
         context = HumanMessage(content=(
             f"RESEARCH TASK:\n{state['task']}\n\n"
@@ -420,10 +503,12 @@ def make_journalist_node(config: dict, model, tools: list):
     max_rounds = config["orchestrator"].get("max_tool_rounds_per_agent", 5)
 
     async def journalist_node(state: GraphState):
-        full_findings = _format_findings(state.get("agent_outputs", {}))
+        agent_outputs = state.get("agent_outputs", {})
+        full_findings = _format_findings(agent_outputs, exclude=journalist_name)
         revision_note = ""
         if state.get("revision_count", 0) > 0:
             revision_note = (
+                f"\n\nPREVIOUS DRAFT (rejected):\n{agent_outputs.get(journalist_name, '')}"
                 f"\n\nREVISION INSTRUCTIONS FROM REVIEWER-2:\n"
                 f"{state.get('next_instructions', '')}\n"
                 "Address all reviewer feedback in this revised version."
@@ -494,7 +579,7 @@ def make_reviewer_node(config: dict, reviewer_model, hitl_cfg: dict):
         ])
         usage = _extract_token_usage(response)
 
-        if response.content.strip().startswith("APPROVED"):
+        if _APPROVED_RE.match(response.content.strip()):
             return {
                 "reviewer_approved": True,
                 "messages": [AIMessage(content="[Reviewer-2]: APPROVED")],
@@ -574,7 +659,9 @@ def build_graph(config: dict = None):
     # ── Build models once ────────────────────────────────────────────────
     base_model = create_model(config)
     reviewer_model_inst = create_reviewer_model(config)
-    orchestrator_routing_model = base_model.with_structured_output(OrchestratorDecision)
+    # include_raw=True keeps the raw AIMessage so the orchestrator's token usage
+    # can be counted; _unpack_routing_result() handles both result shapes.
+    orchestrator_routing_model = base_model.with_structured_output(OrchestratorDecision, include_raw=True)
 
     workflow = StateGraph(GraphState)
 
@@ -610,19 +697,18 @@ def build_graph(config: dict = None):
     specialist_set = set(specialist_names)
 
     def orchestrator_router(state: GraphState):
-        targets = state.get("next_agents", ["END"])
+        targets = state.get("next_agents", [])
         specialist_targets = [t for t in targets if t in specialist_set]
         if len(specialist_targets) > 1:
             return [Send(name, state) for name in specialist_targets]
         elif len(specialist_targets) == 1:
             return specialist_targets[0]
-        elif "Journalist" in targets:
-            return "Journalist"
-        return "reviewer" if reviewer_enabled else END
+        # Anything else (including an empty or unknown target list) means the
+        # evidence phase is over: the Journalist is the only way to finish a run.
+        return "Journalist"
 
     routing_map = {name: name for name in specialist_names}
     routing_map["Journalist"] = "Journalist"
-    routing_map["END"] = "reviewer" if reviewer_enabled else END
 
     workflow.add_conditional_edges("orchestrator", orchestrator_router, routing_map)
 

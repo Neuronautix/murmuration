@@ -4,7 +4,8 @@ Offline tests for the orchestration control flow in automation/graph.py.
 Written for docs/dev/ORCHESTRATION_AUDIT.md. Every test runs the real compiled
 LangGraph with fake chat models — no API keys, no network.
 
-Two kinds of tests live here:
+Two kinds of tests live here (findings B1, B3, B6–B10 and R4 from the audit
+were fixed in the quick-win pass, so their tests now run as plain regression tests):
 
 * plain tests document behaviour that is correct today (bounds, merging,
   fallbacks) so a refactor cannot silently change it;
@@ -211,6 +212,8 @@ def test_unknown_agent_name_falls_back_to_journalist():
     chat = FakeChat([decision(["Ghost"])])
     graph = build(make_config(), chat)
     assert node_sequence(graph) == ["orchestrator", "Journalist", "reviewer"]
+    state = run(build(make_config(), FakeChat([decision(["Ghost"])])))
+    assert "ignored unknown targets ['Ghost']" in state["messages"][0].content
 
 
 def test_empty_next_agents_falls_back_to_journalist():
@@ -227,23 +230,19 @@ def test_specialist_and_journalist_in_one_decision_runs_specialist_only():
     assert node_sequence(graph) == ["orchestrator", "A", "orchestrator", "Journalist", "reviewer"]
 
 
-@pytest.mark.xfail(strict=True, raises=KeyError,
-                   reason="AUDIT B1: orchestrator_router returns 'reviewer', which is not a key of routing_map")
 def test_end_route_with_reviewer_enabled_does_not_crash():
+    """AUDIT B1: an END decision used to raise KeyError inside the conditional edge."""
     chat = FakeChat([decision(["END"])])
     graph = build(make_config(reviewer_enabled=True), chat)
-    run(graph)
+    assert node_sequence(graph) == ["orchestrator", "Journalist", "reviewer"]
 
 
-@pytest.mark.xfail(strict=True, raises=KeyError,
-                   reason="AUDIT B1: orchestrator_router returns END ('__end__'), which is not a key of routing_map")
 def test_end_route_with_reviewer_disabled_does_not_crash():
     chat = FakeChat([decision(["END"])])
     graph = build(make_config(reviewer_enabled=False), chat)
-    run(graph)
+    assert node_sequence(graph) == ["orchestrator", "Journalist"]
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT B1: an END decision must still produce a Journalist draft")
 def test_end_route_still_runs_journalist():
     chat = FakeChat([decision(["END"])])
     graph = build(make_config(), chat)
@@ -259,7 +258,7 @@ def test_parallel_branches_merge_outputs_and_token_usage_once():
     graph = build(make_config(specialists=("A", "B", "C")), chat)
     state = run(graph)
     assert sorted(state["agent_outputs"]) == ["A", "B", "C", "Journalist"]
-    llm_calls = len(chat.calls)  # 3 specialists + 1 journalist; router usage is not reported (see B8)
+    llm_calls = len(chat.calls) + len(chat.router.calls)  # 3 specialists + journalist + 2 routing calls
     assert state["token_usage"]["total_tokens"] == USAGE["total_tokens"] * llm_calls + 2  # +2 reviewer
 
 
@@ -280,8 +279,6 @@ def test_per_agent_assignment_overrides_shared_instructions():
     assert "only-B" in chat.human("B")
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT B3: agent_assignments merge forever, so a stale per-agent "
-                                       "assignment shadows the new shared instructions")
 def test_stale_assignment_is_not_reused_on_a_later_dispatch():
     chat = FakeChat([decision(["A", "B"], assignments={"A": "OLD-A", "B": "OLD-B"}),
                      decision(["A"], instructions="NEW-SHARED"),
@@ -336,7 +333,6 @@ def test_revision_loop_is_bounded_and_force_approves():
     assert "safety valve" in state["messages"][-1].content
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT B6: verdict parsing is a bare startswith('APPROVED')")
 def test_reviewer_accepts_markdown_wrapped_approved():
     chat = FakeChat([decision(["Journalist"])])
     reviewer = FakeReviewer(["**APPROVED**"])
@@ -346,13 +342,15 @@ def test_reviewer_accepts_markdown_wrapped_approved():
     assert chat.count("Journalist") == 1
 
 
-def test_journalist_revision_prompt_includes_its_own_previous_draft():
-    """Documents audit R11: the previous draft is re-injected under the 'specialist findings' heading."""
+def test_journalist_revision_prompt_labels_the_previous_draft():
+    """AUDIT R11: the previous draft is shown as PREVIOUS DRAFT, not as a specialist finding."""
     chat = FakeChat([decision(["Journalist"])])
     reviewer = FakeReviewer(["REJECTED: fix", "APPROVED"])
     graph = build(make_config(), chat, reviewer)
     run(graph)
-    assert "### [Journalist]" in chat.human("Journalist", index=1)
+    second = chat.human("Journalist", index=1)
+    assert "PREVIOUS DRAFT" in second and "findings from Journalist #1" in second
+    assert "### [Journalist]" not in second
 
 
 @pytest.mark.xfail(strict=True, reason="AUDIT B2: the Journalist brief in graph.py hard-codes psychiatry wording "
@@ -389,10 +387,8 @@ def test_one_failed_parallel_branch_keeps_the_other_findings():
     assert "Journalist" in state["agent_outputs"]
 
 
-@pytest.mark.xfail(strict=True, raises=RuntimeError,
-                   reason="AUDIT B7: ToolNode is built without handle_tool_errors=True, so with langgraph>=1.0 "
-                          "an exception inside a tool body aborts the run")
 def test_tool_exception_is_returned_to_the_agent_not_raised():
+    """AUDIT B7: ToolNode(handle_tool_errors=True) turns a raising tool into a ToolMessage."""
     class ToolOnce(FakeChat):
         async def ainvoke(self, msgs, **kwargs):
             name = self.persona(msgs)
@@ -476,8 +472,6 @@ def test_hitl_on_rejection_resume_honours_the_users_choice():
     assert chat.count("Journalist") == 2
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT B9: post_plan override matches agent names as substrings of the "
-                                       "user's free text")
 def test_hitl_override_does_not_dispatch_agents_the_user_asked_to_skip():
     cfg = make_config(specialists=("LitScout", "B"), hitl={"enabled": True, "checkpoints": ["post_plan"]})
     router = ScriptedRouter([decision(["B"])])
@@ -488,8 +482,8 @@ def test_hitl_override_does_not_dispatch_agents_the_user_asked_to_skip():
     assert "LitScout" not in out["next_agents"]
 
 
-def test_hitl_free_text_without_agent_names_is_ignored():
-    """Documents audit R14: a redirect that names no agent leaves plan and instructions unchanged."""
+def test_hitl_free_text_without_agent_names_becomes_a_redirect_note():
+    """AUDIT R14: a redirect that names no agent keeps the plan but is appended to the instructions."""
     cfg = make_config(specialists=("Alpha", "Beta"), hitl={"enabled": True, "checkpoints": ["post_plan"]})
     router = ScriptedRouter([decision(["Beta"], instructions="original")])
     with patch("automation.config.load_persona_content", return_value="p"), \
@@ -497,14 +491,13 @@ def test_hitl_free_text_without_agent_names_is_ignored():
         node = make_orchestrator_node(cfg, ["Alpha", "Beta"], router, cfg["hitl"])
         out = node(initial_state())
     assert out["next_agents"] == ["Beta"]
-    assert out["next_instructions"] == "original"
+    assert out["next_instructions"].startswith("original")
+    assert "USER REDIRECT: please focus on epidemiology instead" in out["next_instructions"]
 
 
 # ── 6. Cost and observability ──────────────────────────────────────────────
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT B8: with_structured_output() returns a bare Pydantic object, "
-                                       "so the orchestrator's token usage is never counted")
 def test_orchestrator_token_usage_is_counted():
     chat = FakeChat([decision(["Journalist"])])
     graph = build(make_config(), chat)
@@ -514,8 +507,6 @@ def test_orchestrator_token_usage_is_counted():
     assert state["token_usage"]["input_tokens"] == expected
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT R4: the orchestrator receives every finding uncompressed on every "
-                                       "routing call")
 def test_orchestrator_prompt_compresses_findings():
     cfg = make_config()
     router = ScriptedRouter([decision(["Journalist"])])
@@ -544,9 +535,6 @@ def test_orchestrator_persona_tools_are_not_loaded():
 # ── 7. Grounding / config consistency ──────────────────────────────────────
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT B10: build_agent_system_prompt tells every specialist to call "
-                                       "append_traceability_matrix, but the shipped configs do not assign the "
-                                       "tool to the literature-searching specialists")
 def test_specialists_told_to_log_traceability_have_the_tool():
     from automation.config import CONFIG_PATH, load_config
     config = load_config(CONFIG_PATH)
@@ -556,3 +544,107 @@ def test_specialists_told_to_log_traceability_have_the_tool():
     missing = [p["name"] for p in config["personas"]
                if p["name"] not in (orch, journ) and not trace_keys & set(p.get("tools", []))]
     assert missing == []
+
+
+# ── 8. Quick-win regression tests ──────────────────────────────────────────
+
+
+def test_hitl_override_with_exact_names_dispatches_those_agents():
+    cfg = make_config(specialists=("LitScout", "Beta"), hitl={"enabled": True, "checkpoints": ["post_plan"]})
+    router = ScriptedRouter([decision(["Beta"], instructions="original")])
+    with patch("automation.config.load_persona_content", return_value="p"), \
+         patch("automation.graph.interrupt", return_value="litscout, Journalist; and keep it short"):
+        node = make_orchestrator_node(cfg, ["LitScout", "Beta"], router, cfg["hitl"])
+        out = node(initial_state())
+    assert out["next_agents"] == ["LitScout", "Journalist"]
+    assert out["agent_call_count"] == 1
+    assert "USER REDIRECT: and keep it short" in out["next_instructions"]
+
+
+def test_parse_plan_override_matches_whole_names_only():
+    from automation.graph import _parse_plan_override
+    agents, text = _parse_plan_override("Skip LitScout, go straight to the Journalist", ["LitScout", "Journalist"])
+    assert agents == []
+    assert text == "Skip LitScout, go straight to the Journalist"
+    agents, text = _parse_plan_override("LitScout\nJournalist.", ["LitScout", "Journalist"])
+    assert (agents, text) == (["LitScout", "Journalist"], "")
+
+
+def test_compute_recursion_limit_covers_the_worst_case_run():
+    """The limit passed to LangGraph must exceed the longest run the safety valves allow."""
+    from automation.graph import compute_recursion_limit
+    cfg = make_config(specialists=("A",), max_agent_calls=4, max_rev=2)
+    chat = FakeChat([decision(["A"])])
+    graph = build(cfg, chat, FakeReviewer(["REJECTED: n"]))
+    steps = len(node_sequence(graph, config={"recursion_limit": compute_recursion_limit(cfg)}))
+    assert steps == 2 * 4 + 1 + 1 + 2 * 2 + 1   # 4 cycles, valve, Journalist, 2 revision loops, force-approve
+    assert compute_recursion_limit(cfg) > steps
+    assert compute_recursion_limit(make_config(max_agent_calls=8, max_rev=3)) >= 25
+    assert compute_recursion_limit(make_config(reviewer_enabled=False)) < compute_recursion_limit(make_config())
+
+
+def test_routing_result_unpack_counts_tokens_and_surfaces_parse_errors():
+    from automation.graph import _unpack_routing_result
+    d = decision(["A"])
+    assert _unpack_routing_result(d) == (d, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+    raw = AIMessage(content="", usage_metadata=USAGE)
+    assert _unpack_routing_result({"raw": raw, "parsed": d, "parsing_error": None}) == (d, USAGE)
+    with pytest.raises(ValueError, match="unparseable"):
+        _unpack_routing_result({"raw": raw, "parsed": None, "parsing_error": Exception("bad json")})
+
+
+def test_traceability_instruction_only_when_the_agent_has_the_tool():
+    from automation.config import build_agent_system_prompt
+    persona = {"name": "A", "role": "r", "content": "c"}
+    with_tool = build_agent_system_prompt(persona, ["[FACT]"], tool_names=["append_traceability_matrix"])
+    without = build_agent_system_prompt(persona, ["[FACT]"], tool_names=["search_pubmed"])
+    legacy = build_agent_system_prompt(persona, ["[FACT]"])
+    assert "append_traceability_matrix" in with_tool and "append_traceability_matrix" in legacy
+    assert "append_traceability_matrix" not in without
+    assert "EPISTEMIC TAGS" in without and "in-text citations" in without
+
+
+def test_doctor_warns_when_a_searching_specialist_cannot_log_traceability(tmp_path):
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH
+    cfg = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    report = inspect_swarm(tmp_path)
+    assert not [i for i in report.issues if "no traceability tool" in i.message]
+    for p in cfg["personas"]:
+        if p["name"] == "LitScout":
+            p["tools"] = [t for t in p["tools"] if t != "append_traceability"]
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    report = inspect_swarm(tmp_path)
+    hits = [i for i in report.issues if "no traceability tool" in i.message]
+    assert len(hits) == 1 and "LitScout" in hits[0].message and hits[0].severity == "warning"
+
+
+def test_matrix_row_escapes_pipes_and_newlines(tmp_path):
+    from automation.tools import append_traceability_matrix
+    matrix = tmp_path / "M.md"
+    matrix.write_text("| Source | Author/Agent | Claim | Method | Epistemic Tag |\n|--|--|--|--|--|\n", encoding="utf-8")
+    cfg = {"swarm": {"output_dir": str(tmp_path), "traceability_matrix": str(matrix)}}
+    with patch("automation.config.load_config", return_value=cfg):
+        result = append_traceability_matrix.invoke({"fact": "a | b\nc", "source": "S|1", "epistemic_tag": "[FACT]"})
+    assert result.startswith("SUCCESS")
+    row = matrix.read_text(encoding="utf-8").splitlines()[-1]
+    assert row.count("|") - row.count("\\|") == 6
+    assert "a \\| b c" in row and "S\\|1" in row
+
+
+def test_run_metrics_uses_configured_pricing(tmp_path):
+    import json
+
+    from automation.main import _write_run_metrics
+    cfg = make_config()
+    cfg["swarm"]["output_dir"] = str(tmp_path)
+    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000, "total_tokens": 2_000_000}
+    _write_run_metrics(cfg, "t", usage)
+    assert json.loads((tmp_path / "run_metrics.json").read_text())["estimated_cost_usd"] == 12.5
+    cfg["model"]["pricing"] = {"input_per_m": 1.0, "output_per_m": 2.0}
+    _write_run_metrics(cfg, "t", usage)
+    metrics = json.loads((tmp_path / "run_metrics.json").read_text())
+    assert metrics["estimated_cost_usd"] == 3.0 and "model.pricing" in metrics["cost_note"]

@@ -34,13 +34,13 @@ personas:
     icon: "📋"
     role: "Case Law Researcher"
     persona_file: "./agents/Paralegal/persona.md"
-    tools: [search_web, search_kb, scrape_page]
+    tools: [search_web, search_kb, scrape_page, append_traceability]
 
   - name: "Compliance"
     icon: "🛡️"
     role: "Regulatory Compliance Checker"
     persona_file: "./agents/Compliance/persona.md"
-    tools: [search_web, search_kb]
+    tools: [search_web, search_kb, append_traceability]
 
   - name: "Clerk"
     icon: "✍️"

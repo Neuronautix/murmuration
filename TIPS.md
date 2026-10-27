@@ -227,6 +227,8 @@ Report modes prepend a structured format instruction to the prompt, which consis
 - `gpt-4o` at temperature 0.2 is the recommended default — it is accurate and relatively economical.
 - Use `max_agent_calls: 4–6` for focused questions; `8–12` for broad multi-topic synthesis.
 - Use `max_tool_rounds_per_agent: 3–4` for standard runs; increase to 6–8 only for deep literature mapping tasks.
+- `max_findings_chars` (default 1500) caps how much of each specialist's output the orchestrator re-reads on every routing decision; `max_peer_chars` (default 600) caps what one specialist sees of a colleague's findings. Raise them for dense evidence, lower them to save tokens on long runs.
+- If you change the model, set `model.pricing: {input_per_m, output_per_m}` so the cost estimate in `run_metrics.json` matches your rates (defaults are gpt-4o list prices).
 - Run `make doctor` before a long autonomous run to catch config errors that would cause a failed run at cost.
 - Check `Drafts/run_metrics.json` after each run to track token usage and cost trends.
 

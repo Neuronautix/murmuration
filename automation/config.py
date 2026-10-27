@@ -174,11 +174,17 @@ def load_tools_for_persona(config: dict, persona_cfg: dict) -> list:
     return tool_functions
 
 
-def build_agent_system_prompt(persona_cfg: dict, epistemic_tags: list = None) -> str:
+def build_agent_system_prompt(persona_cfg: dict, epistemic_tags: list = None,
+                              tool_names: list = None) -> str:
     """Build a focused system prompt for a single agent node.
 
     Injects only this agent's persona content — not all agents — keeping
     per-call token cost proportional to one persona rather than the full swarm.
+
+    ``tool_names`` are the names of the tools actually bound to this agent. When
+    given, the traceability-logging instruction is only emitted if the agent has
+    a tool that writes to the matrix; otherwise the agent would be told to call
+    a tool it cannot see.
     """
     name = persona_cfg.get("name", "Agent")
     icon = persona_cfg.get("icon", "🤖")
@@ -189,11 +195,10 @@ def build_agent_system_prompt(persona_cfg: dict, epistemic_tags: list = None) ->
 
     if epistemic_tags:
         tags_str = ", ".join(epistemic_tags)
-        prompt += (
-            f"\n\nEPISTEMIC TAGS: Classify every claim with one of: {tags_str}\n"
-            "After every literature or web search, call `append_traceability_matrix` immediately.\n"
-            "Include formal in-text citations in all outputs."
-        )
+        prompt += f"\n\nEPISTEMIC TAGS: Classify every claim with one of: {tags_str}\n"
+        if tool_names is None or "append_traceability_matrix" in tool_names:
+            prompt += "After every literature or web search, call `append_traceability_matrix` immediately.\n"
+        prompt += "Include formal in-text citations in all outputs."
 
     return prompt
 

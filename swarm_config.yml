@@ -34,11 +34,17 @@ swarm:
 # journalist:               persona name that writes final structured output
 # max_agent_calls:          total specialist invocations before forcing Journalist
 # max_tool_rounds_per_agent: tool-use loop limit inside each specialist call
+# max_findings_chars:       characters of each specialist's findings shown to the
+#                           orchestrator when it decides the next step (default 1500)
+# max_peer_chars:           characters of each colleague's findings shown to a
+#                           specialist as context (default 600)
 orchestrator:
   agent: "Orchestrator"
   journalist: "Journalist"
   max_agent_calls: 8
   max_tool_rounds_per_agent: 5
+  # max_findings_chars: 1500
+  # max_peer_chars: 600
 
 # ── LLM Backend ─────────────────────────────────────
 # Supported providers: openai, anthropic, google
@@ -49,6 +55,11 @@ model:
   name: "gpt-4o"
   temperature: 0.2
   env_key: "OPENAI_API_KEY"
+  # Optional: list prices used for the cost estimate in Drafts/run_metrics.json.
+  # Defaults are gpt-4o list prices; set these when you change the model.
+  # pricing:
+  #   input_per_m: 2.50
+  #   output_per_m: 10.00
 
 # ── Personas ─────────────────────────────────────────
 # Each persona has a name, icon, role description, a persona file
@@ -82,6 +93,7 @@ personas:
       - you_research
       - lookup_doi
 
+      - append_traceability
   - name: "Specialist2"
     icon: "📊"
     role: "Domain specialist 2 — rename and customize for your second area of expertise"
@@ -95,6 +107,7 @@ personas:
       - you_research
       - lookup_doi
 
+      - append_traceability
   - name: "LitScout"
     icon: "📚"
     role: "Literature cartographer — citation chaining, landmark-paper identification, author-trail expansion"
@@ -106,6 +119,7 @@ personas:
       - lookup_doi
       - scrape_page
 
+      - append_traceability
   - name: "Journalist"
     icon: "✍️"
     role: "Observer & Scribe — structured, neutral final output"

@@ -73,7 +73,7 @@ from automation.config import (
     resolve_swarm_path,
     validate_env,
 )
-from automation.graph import Command, build_graph  # Command re-exported from graph.py
+from automation.graph import Command, build_graph, compute_recursion_limit  # Command re-exported from graph.py
 
 # Load environment configuration (.env)
 load_dotenv()
@@ -213,8 +213,11 @@ def _write_run_metrics(config: dict, task: str, token_usage: dict) -> None:
     drafts_dir = resolve_swarm_path(config, "output_dir")
     drafts_dir.mkdir(parents=True, exist_ok=True)
 
-    input_price_per_m = 2.50   # gpt-4o list pricing $/M tokens (2025)
-    output_price_per_m = 10.00
+    # Defaults are gpt-4o list prices ($/M tokens, 2025). Override per model with
+    # model.pricing: {input_per_m: ..., output_per_m: ...} in swarm_config.yml.
+    pricing = config["model"].get("pricing") or {}
+    input_price_per_m = float(pricing.get("input_per_m", 2.50))
+    output_price_per_m = float(pricing.get("output_per_m", 10.00))
     input_tok = token_usage.get("input_tokens", 0)
     output_tok = token_usage.get("output_tokens", 0)
     est_cost = (input_tok * input_price_per_m + output_tok * output_price_per_m) / 1_000_000
@@ -227,8 +230,11 @@ def _write_run_metrics(config: dict, task: str, token_usage: dict) -> None:
         "output_tokens": output_tok,
         "total_tokens": token_usage.get("total_tokens", input_tok + output_tok),
         "estimated_cost_usd": round(est_cost, 4),
-        "cost_note": "Estimate uses gpt-4o list pricing ($2.50/M input, $10/M output). "
-                     "Adjust for your model and negotiated rates.",
+        "cost_note": (
+            f"Estimate uses ${input_price_per_m:.2f}/M input and ${output_price_per_m:.2f}/M output"
+            + (" (model.pricing from swarm_config.yml)." if pricing else
+               " (gpt-4o list prices; set model.pricing in swarm_config.yml for your model).")
+        ),
     }
 
     metrics_path = drafts_dir / "run_metrics.json"
@@ -392,8 +398,12 @@ def _run_graph(config: dict, prompt: str) -> None:
 
     graph = build_graph(config)
 
-    # Thread config: required for MemorySaver interrupt/resume; empty dict otherwise.
-    run_config = {"configurable": {"thread_id": str(uuid.uuid4())}} if hitl_enabled else {}
+    # Thread config is required for MemorySaver interrupt/resume. The recursion
+    # limit is derived from the configured safety valves so LangGraph's own step
+    # guard can never fire before max_agent_calls / max_revision_loops do.
+    run_config = {"recursion_limit": compute_recursion_limit(config)}
+    if hitl_enabled:
+        run_config["configurable"] = {"thread_id": str(uuid.uuid4())}
 
     try:
         final_token_usage = asyncio.run(

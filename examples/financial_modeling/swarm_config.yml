@@ -34,13 +34,13 @@ personas:
     icon: "🧮"
     role: "Quantitative Analysis & Model Validation"
     persona_file: "./agents/QuantResearcher/persona.md"
-    tools: [search_web, search_kb, scrape_page]
+    tools: [search_web, search_kb, scrape_page, append_traceability]
 
   - name: "Compliance Officer"
     icon: "🛡️"
     role: "Regulatory & Risk Compliance"
     persona_file: "./agents/ComplianceOfficer/persona.md"
-    tools: [search_web, search_kb]
+    tools: [search_web, search_kb, append_traceability]
 
   - name: "Report Writer"
     icon: "✍️"

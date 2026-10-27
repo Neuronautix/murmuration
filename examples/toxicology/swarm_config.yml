@@ -57,6 +57,7 @@ personas:
       - scrape_page
       - search_web
 
+      - append_traceability
   - name: "TOCSAS Toxicology Lead"
     icon: "☣️"
     role: "Conservative toxicological interpreter — adaptive vs. adverse distinctions, design-contextualized findings"
@@ -69,6 +70,7 @@ personas:
       - scrape_page
       - lookup_doi
 
+      - append_traceability
   - name: "TOCSAS Exposure & Design Specialist"
     icon: "⚗️"
     role: "Dose, route, schedule, formulation, vehicle, recovery, and toxicokinetics expert"
@@ -81,6 +83,7 @@ personas:
       - scrape_page
       - lookup_doi
 
+      - append_traceability
   - name: "TOCSAS Pathology & Biomarker Analyst"
     icon: "🔭"
     role: "Clinical pathology, organ weights, histopathology, biomarker interpretation, severity grading"
@@ -93,6 +96,7 @@ personas:
       - scrape_page
       - lookup_doi
 
+      - append_traceability
   - name: "TOCSAS Metadata Architect"
     icon: "🗂️"
     role: "Extract, normalize, and map metadata to MNMS — classify as core, extension, ambiguous, or missing"

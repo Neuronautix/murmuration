@@ -57,6 +57,7 @@ personas:
       - lookup_doi
       - scrape_page
 
+      - append_traceability
   - name: "HCM Methodology Lead"
     icon: "🔬"
     role: "Hardware, sensor, classifier pipeline, and cross-platform comparability specialist"
@@ -69,6 +70,7 @@ personas:
       - scrape_page
       - lookup_doi
 
+      - append_traceability
   - name: "Behavioral Interpretation Lead"
     icon: "🐭"
     role: "Operational behavioral definitions, ethological validity, and translational limits"
@@ -81,6 +83,7 @@ personas:
       - scrape_page
       - lookup_doi
 
+      - append_traceability
   - name: "Metadata Architect"
     icon: "🗂️"
     role: "MNMS extraction, normalization, and metadata structure mapping"

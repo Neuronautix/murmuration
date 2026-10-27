@@ -53,6 +53,7 @@ personas:
       - search_web
       - search_kb
 
+      - append_traceability
   - name: "Semantica"
     icon: "🦉"
     role: "Ontologist & FAIR Data Expert"
@@ -62,6 +63,7 @@ personas:
       - search_web
       - search_kb
 
+      - append_traceability
   - name: "TechLead"
     icon: "⚙️"
     role: "Architect & Implementation Lead"
@@ -70,6 +72,7 @@ personas:
       - search_web
       - search_kb
 
+      - append_traceability
   - name: "Journalist"
     icon: "✍️"
     role: "Observer & Scribe"

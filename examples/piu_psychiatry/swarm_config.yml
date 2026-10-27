@@ -62,6 +62,7 @@ personas:
       - you_research
       - lookup_doi
 
+      - append_traceability
   - name: "EpiScope"
     icon: "📊"
     role: "Epidemiologist and psychometrics reviewer"
@@ -75,6 +76,7 @@ personas:
       - you_research
       - lookup_doi
 
+      - append_traceability
   - name: "LitScout"
     icon: "📚"
     role: "Scientific literature cartographer for citation chaining and author-trail expansion"
@@ -86,6 +88,7 @@ personas:
       - lookup_doi
       - scrape_page
 
+      - append_traceability
   - name: "NeuroCogs"
     icon: "🧪"
     role: "Mechanisms and neurocognition specialist"
@@ -99,6 +102,7 @@ personas:
       - you_research
       - lookup_doi
 
+      - append_traceability
   - name: "CarePath"
     icon: "🛟"
     role: "Intervention, prevention, and care pathways specialist"
@@ -112,6 +116,7 @@ personas:
       - you_research
       - lookup_doi
 
+      - append_traceability
   - name: "Journalist"
     icon: "✍️"
     role: "Observer & Scribe"

@@ -136,6 +136,42 @@ def _check_routing_semantics(
             )
 
 
+def _check_traceability_coverage(
+    report: SwarmDoctorReport,
+    personas: list[dict],
+    tools: dict,
+    orchestrator_name: str,
+    journalist_name: str,
+    epistemic_tags: list,
+) -> None:
+    """Warn when evidence-gathering specialists cannot write to the traceability matrix.
+
+    The runtime tells every specialist to log each search result with an
+    epistemic tag, but only personas that have a matrix-writing tool can do so.
+    """
+    if not epistemic_tags:
+        return
+    trace_tools = {
+        name for name, spec in tools.items()
+        if (spec or {}).get("function") == "append_traceability_matrix"
+    }
+    if not trace_tools:
+        return
+    for persona in personas:
+        name = persona.get("name", "")
+        if name in {orchestrator_name, journalist_name}:
+            continue
+        if _has_any_tool(persona, DISCOVERY_TOOLS) and not _has_any_tool(persona, trace_tools):
+            report.issues.append(
+                ValidationIssue(
+                    "warning",
+                    f"specialist '{name}' has search tools but no traceability tool "
+                    f"({', '.join(sorted(trace_tools))}); its evidence will not reach the traceability matrix",
+                    "swarm_config.yml",
+                )
+            )
+
+
 def _check_reviewer_semantics(report: SwarmDoctorReport, reviewer: dict) -> None:
     reviewer_enabled = reviewer.get("enabled", True)
     max_revision_loops = reviewer.get("max_revision_loops", 3)
@@ -292,6 +328,14 @@ def inspect_swarm(root_dir: Path) -> SwarmDoctorReport:
         max_tool_rounds=orchestrator_block.get("max_tool_rounds_per_agent", 0),
     )
     _check_reviewer_semantics(report, reviewer)
+    _check_traceability_coverage(
+        report,
+        personas,
+        tools,
+        orchestrator_name=orchestrator,
+        journalist_name=journalist,
+        epistemic_tags=config.get("epistemic_tags", []) or [],
+    )
 
     seen_names = set()
     seen_paths = set()

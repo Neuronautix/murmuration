@@ -8,6 +8,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Orchestration quick wins** (see `docs/dev/ORCHESTRATION_AUDIT.md`, findings B1, B3, B6–B10, B12, R4, R7, R8, R11–R15):
+  - An orchestrator decision of `['END']` no longer crashes the run with a `KeyError`; it routes to the Journalist, which is the only way a run can finish.
+  - Per-agent assignments are replaced on every orchestrator pass instead of merged forever, so a stale instruction from an earlier round can no longer shadow new ones.
+  - Reviewer verdicts such as `**APPROVED**` or `APPROVED.` are recognised as approvals instead of burning a revision loop.
+  - Exceptions raised inside a tool are returned to the agent as a tool error message (`handle_tool_errors=True`) instead of aborting the whole run on langgraph ≥ 1.0.
+  - The orchestrator's own token usage is now counted in `run_metrics.json` (`with_structured_output(..., include_raw=True)`).
+  - `post_plan` HITL overrides match exact persona names (comma-separated) instead of substrings; free text is appended to the instructions as `USER REDIRECT` instead of being dropped.
+  - Specialists in the root template and all example packs now have the `append_traceability` tool they were already being instructed to call; the instruction is only injected for agents that actually have the tool.
+  - Traceability-matrix rows escape `|` and newlines so a logged fact can no longer break the table.
+  - `search_pubmed` HTTP calls have a 20 s timeout.
+  - The orchestrator receives compressed findings (default 1500 characters per specialist) instead of every finding verbatim on every routing call.
+  - On revision the Journalist sees its rejected draft under `PREVIOUS DRAFT` instead of disguised as a specialist finding.
+  - Ignored routing targets and deferred Journalist dispatches are noted in the orchestrator's progress message.
+  - An explicit LangGraph `recursion_limit` is derived from `max_agent_calls` and `max_revision_loops`.
+
+### Added
+- `orchestrator.max_findings_chars` and `orchestrator.max_peer_chars` (documented as commented defaults in `swarm_config.yml`).
+- `model.pricing: {input_per_m, output_per_m}` for the cost estimate in `run_metrics.json`; defaults stay at gpt-4o list prices.
+- `swarm doctor` warns when a specialist with search tools has no traceability tool.
+- `tests/test_orchestration.py`: offline control-flow tests for the supervisor loop; remaining audit findings are strict `xfail` tests.
+- `docs/dev/ORCHESTRATION_AUDIT.md`: verified audit of the orchestration layer with ranked recommendations.
+
 ### Changed
 - **Renamed the project from Research Swarm to Murmuration.** The Python package is now `murmuration` (`pip show murmuration`) and HTTP tools send `User-Agent: Murmuration/1.0`. The CLI (`swarm`), import package (`automation`) and `swarm_config.yml` schema are unchanged.
 - Repository moved from `dhuzard/metodax` (METODAX) to `Neuronautix/murmuration`. Project URLs in `pyproject.toml`, `CITATION.cff`, README, QUICKSTART, CONTRIBUTING and FAQ now point to the new location; they previously pointed to `dhuzard/piu-psych-swarm`.

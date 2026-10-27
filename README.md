@@ -205,6 +205,10 @@ hitl:
     - on_rejection     # choose REVISE / OVERRIDE when Reviewer-2 rejects
 ```
 
+At `post_plan`, type `APPROVE`, or exact persona names separated by commas to replace the
+plan (for example `LitScout, Journalist`). Anything else you type is passed to the agents
+as a `USER REDIRECT` note without changing the plan.
+
 ---
 
 ## Repository Layout
