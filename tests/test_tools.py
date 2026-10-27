@@ -68,3 +68,72 @@ def test_append_traceability_matrix_returns_string(tmp_path):
             "epistemic_tag": "[FACT]",
         })
     assert isinstance(result, str)
+
+
+def _write_config_with_paths(tmp_path):
+    return {
+        "swarm": {
+            "output_dir": str(tmp_path / "Drafts" / "Pack"),
+            "traceability_matrix": str(tmp_path / "Matrix_Pack.md"),
+        }
+    }
+
+
+def test_write_manuscript_section_honors_configured_output_dir(tmp_path):
+    """write_manuscript_section writes into swarm.output_dir, not the root Drafts/."""
+    from automation.tools import write_manuscript_section
+
+    with patch("automation.config.load_config", return_value=_write_config_with_paths(tmp_path)):
+        result = write_manuscript_section.invoke({"section_name": "Intro", "content": "Hello"})
+
+    assert result.startswith("SUCCESS")
+    assert (tmp_path / "Drafts" / "Pack" / "intro.md").read_text(encoding="utf-8") == "Hello"
+
+
+def test_append_traceability_matrix_honors_configured_path(tmp_path):
+    """append_traceability_matrix appends to swarm.traceability_matrix."""
+    from automation.tools import append_traceability_matrix
+
+    matrix = tmp_path / "Matrix_Pack.md"
+    matrix.write_text(
+        "| Source | Author/Agent | Claim | Method | Epistemic Tag |\n"
+        "|--------|-------------|-------|--------|---------------|\n",
+        encoding="utf-8",
+    )
+    with patch("automation.config.load_config", return_value=_write_config_with_paths(tmp_path)):
+        result = append_traceability_matrix.invoke({
+            "fact": "Pack-specific claim.",
+            "source": "PMID:1",
+            "epistemic_tag": "[FACT]",
+        })
+
+    assert result.startswith("SUCCESS")
+    assert "Pack-specific claim." in matrix.read_text(encoding="utf-8")
+
+
+def test_resolve_swarm_path_relative_to_project_root():
+    """Relative paths resolve against the project root; missing keys use defaults."""
+    from automation.config import PROJECT_ROOT, resolve_swarm_path
+
+    cfg = {"swarm": {"output_dir": "./Drafts/TOCSAS"}}
+    assert resolve_swarm_path(cfg, "output_dir") == PROJECT_ROOT / "Drafts" / "TOCSAS"
+    assert resolve_swarm_path(cfg, "traceability_matrix") == PROJECT_ROOT / "Knowledge_Traceability_Matrix.md"
+
+
+def test_git_commit_snapshot_stages_only_existing_in_repo_paths(tmp_path):
+    """git_commit_snapshot skips missing or out-of-repo paths and force-adds the rest."""
+    from automation.config import PROJECT_ROOT
+    from automation.tools import git_commit_snapshot
+
+    paths = {
+        "output_dir": PROJECT_ROOT / "Drafts",  # tracked via .gitkeep, always exists
+        "traceability_matrix": tmp_path / "outside_repo.md",
+    }
+    paths["traceability_matrix"].write_text("x", encoding="utf-8")
+    run = MagicMock(return_value=MagicMock(stdout=""))
+    with patch("automation.config.resolve_swarm_path", side_effect=lambda _cfg, key: paths[key]), \
+         patch("automation.tools.subprocess.run", run):
+        result = git_commit_snapshot.invoke({"message": "test"})
+
+    assert run.call_args_list[0].args[0] == ["git", "add", "--force", "--", "Drafts"]
+    assert result == "No changes to commit in swarm output paths."

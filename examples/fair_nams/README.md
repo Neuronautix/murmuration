@@ -37,7 +37,9 @@ add them locally before running `make ingest`.
 Persona paths in `swarm_config.yml` are relative to the repository root.
 `make ingest` reads KB files from `agents/<folder>/KB/`, so copy the
 KB-bearing folders. Do not copy `Journalist`, which would overwrite the root
-template's `agents/Journalist`. From the repository root:
+template's `agents/Journalist`. The pack's Journalist has no KB of its own, so
+`make ingest` indexes the root template's `agents/Journalist/KB/` for it. From
+the repository root:
 
 ```bash
 cp examples/fair_nams/swarm_config.yml .
