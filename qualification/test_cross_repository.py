@@ -90,8 +90,11 @@ def test_pilot_native_validation_staging_retry_and_no_promotion(tmp_path, monkey
     assert len(ingest.list_staged_mapppp()) == 1
     assert ingest.stores.accepted.list_all() == []
     assert list(ingest.stores.settings.graphs_dir.rglob("*")) == []
+    original_bundle = outputs["bundle"].read_bytes()
     retry = run_hcm_pilot(FIXTURES / "hcm_circadian_mouse_demo.yaml", tmp_path / "pilot")
-    assert retry["bundle"].read_bytes() == outputs["bundle"].read_bytes()
+    assert retry["bundle"].read_bytes() == original_bundle
+    assert ingest.ingest_mapppp_bundle_file(retry["bundle"]) == first
+    assert len(ingest.list_staged_mapppp()) == 1
     optional = run_hcm_pilot(FIXTURES / "hcm_circadian_mouse_demo.yaml", tmp_path / "pilot",
                              suggest_hcmo=True)
     suggested = validate_bundle(optional["bundle"].read_bytes())

@@ -289,7 +289,7 @@ def _extract_sensor_modality(text: str) -> str | None:
 
 
 def _extract_software_version(text: str) -> str | None:
-    match = re.search(r"\b(?:classifier|software)\s+version\s+[A-Za-z0-9._-]+\b", text, re.I)
+    match = re.search(r"\b(?:classifier|software)\s+version\s+v?\d[A-Za-z0-9._-]*\b", text, re.I)
     return _normalise_value(match.group(0)) if match else None
 
 

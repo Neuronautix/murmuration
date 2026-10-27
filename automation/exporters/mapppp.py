@@ -688,7 +688,7 @@ def export_hcm_mapppp_bundle(
             created_by="automation.exporters.mapppp.export_hcm_mapppp_bundle",
         ),
         study_context=study_context,
-        sources=sorted([*references.sources.values(), *([HCMO_SOURCE] if suggest_hcmo else [])],
+        sources=sorted([*references.current_sources(), *([HCMO_SOURCE] if suggest_hcmo else [])],
                        key=lambda source: source["source_id"]),
         metadata_assertions=metadata_assertions,
         evidence_assertions=evidence_assertions,

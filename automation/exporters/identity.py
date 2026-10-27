@@ -31,6 +31,7 @@ class SourceRegistry:
         self.bindings: dict[str, str] = {}
         self.sources: dict[str, dict] = {}
         self.packages: dict[str, str] = {}
+        self.used: set[str] = set()
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
             self.sources = data.get("sources", {})
@@ -49,7 +50,12 @@ class SourceRegistry:
         if prior and prior.get("title") and not title:
             record["title"] = prior["title"]
         self.sources[source_id] = record
+        self.used.add(source_id)
         return source_id
+
+    def current_sources(self) -> list[dict]:
+        """Records registered by this export; the persisted registry also keeps earlier drafts' sources."""
+        return [self.sources[source_id] for source_id in self.used]
 
     def bind(self, marker: str, source_id: str) -> None:
         if marker not in self.references:

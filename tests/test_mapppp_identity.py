@@ -43,3 +43,21 @@ def test_unresolved_citation_fails_closed(tmp_path):
         "Light cycle transition timing was not reported [99]"), encoding="utf-8")
     with pytest.raises(ValueError, match="Unresolved citation reference"):
         export_hcm_mapppp_bundle(config, draft, matrix, notes)
+
+
+def test_retry_after_revision_keeps_package_id(tmp_path):
+    """Exporting A, then revision B, then A again must reproduce A's bundle exactly."""
+    config, matrix, draft, notes = _write_hcm_fixture_files(tmp_path)
+    kwargs = dict(config_path=config, draft_path=draft, traceability_matrix_path=matrix,
+                  review_notes_path=notes)
+    original = draft.read_text(encoding="utf-8")
+    first = export_hcm_mapppp_bundle(**kwargs, exported_at=datetime(2026, 4, 10, tzinfo=timezone.utc))
+    draft.write_text(original.replace(
+        "Light cycle transition timing was not reported", "Light cycle and temperature were not reported"),
+        encoding="utf-8")
+    export_hcm_mapppp_bundle(**kwargs, exported_at=datetime(2026, 4, 11, tzinfo=timezone.utc))
+    draft.write_text(original, encoding="utf-8")
+    retry = export_hcm_mapppp_bundle(**kwargs, exported_at=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    assert retry.model_dump(mode="json") == first.model_dump(mode="json")
+    registry = json.loads((draft.parent / "source_registry.json").read_text(encoding="utf-8"))
+    assert len(registry["sources"]) > len(retry.sources)

@@ -49,3 +49,22 @@ def test_unreported_values_and_unknown_fields_never_get_invented_iris():
     result = suggest_hcmo_mappings(metadata)
     assert result["mappings"] == []
     assert {gap["field"] for gap in result["gaps"]} == {"unknown_platform", "species"}
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Activity was scored with classifier version 2.1.3.", "classifier version 2.1.3"),
+    ("Tracking used software version v4.0.", "software version v4.0"),
+    ("The software version was not reported.", None),
+    ("Classifier version unknown.", None),
+])
+def test_software_version_requires_a_version_number(text, expected):
+    from automation.hcm_pilot import _extract_software_version
+
+    assert _extract_software_version(text) == expected
+
+
+def test_unreported_software_version_is_not_recorded_as_reported():
+    paper = CachedPaper(pmid="42", title="Home-cage monitoring in mice",
+                        abstract="Mice were monitored in the home cage. The software version was not reported.")
+    built = _build_metadata_and_evidence([paper], "2026-10-23T00:00:00Z")
+    assert "software_version" not in {item["field"] for item in built["metadata_assertions"]}
