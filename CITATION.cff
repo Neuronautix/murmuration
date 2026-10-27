@@ -12,7 +12,7 @@ authors:
 version: 0.2.0
 date-released: "2026-04-09"
 license: MIT
-repository-code: "https://github.com/Neuronautix/research-swarm"
+repository-code: "https://github.com/Neuronautix/murmuration"
 abstract: >-
   Murmuration is a configuration-driven multi-agent research framework
   built on LangGraph. It deploys an autonomous team of AI specialists

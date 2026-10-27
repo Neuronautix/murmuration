@@ -171,6 +171,6 @@ API keys stay local in `.env` (which is gitignored) and are never shared through
 
 ### Where can I get help?
 
-- Open a [GitHub issue](https://github.com/Neuronautix/research-swarm/issues) for bugs or questions
+- Open a [GitHub issue](https://github.com/Neuronautix/murmuration/issues) for bugs or questions
 - See [TIPS.md](TIPS.md) for guidance on building effective swarms
 - See [CONTRIBUTING.md](CONTRIBUTING.md) to share a domain example or contribute a fix
