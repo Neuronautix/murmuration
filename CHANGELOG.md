@@ -24,7 +24,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Ignored routing targets and deferred Journalist dispatches are noted in the orchestrator's progress message.
   - An explicit LangGraph `recursion_limit` is derived from `max_agent_calls` and `max_revision_loops`.
 
+- **Orchestration robustness** (audit findings B4, B5, B13–B15, R1, R3):
+  - HITL checkpoints are separate nodes that make no LLM calls, so resuming after `post_plan` or `on_rejection` runs exactly the plan or verdict you answered. Previously the routing or reviewer call was replayed on resume and could produce a different result.
+  - The `pre_journalist` framing and the orchestrator's instructions now reach the Journalist, on every draft. They were silently dropped before.
+  - A specialist or Journalist that is still calling tools when `max_tool_rounds_per_agent` runs out gets one final call without tools and reports what it found, instead of returning empty text.
+  - An empty draft is rejected without a reviewer call; if it stays empty the run reports failure instead of "Task complete".
+  - A model error in one agent no longer aborts the run: the failure is recorded and the other agents' findings are kept. An unusable routing reply is retried once.
+  - A specialist dispatched twice keeps its earlier findings; duplicate targets in one decision are dispatched once.
+  - Builder commands (`persona add`, `team configure`, …) no longer drop config keys they do not model, such as `output_sections`, `reviewer.custom_prompt` or a cross-provider `reviewer.model.provider`.
+  - Message content returned as a list of blocks (Anthropic-style) is handled by the reviewer and all agents.
+
 ### Added
+- **`orchestrator.on_agent_failure`**: `continue` (default) records a failed agent and keeps going; `abort` stops on the first error.
+- `execute` and `report` print whether the draft was approved, force-approved after `reviewer.max_revision_loops`, or overridden by the user, and exit with code 1 when no draft was produced.
 - **`journalist.brief`**: the Journalist's task instructions are now a Jinja2 template in `swarm_config.yml` (audit finding B2). The runtime previously hard-coded a psychiatry-specific requirement ("distinguish high engagement from clinical impairment") and two tool names for every domain. The default brief lists `reviewer.required_elements`; the toxicology and HCM examples render their `output_sections` lists, and the PIU example keeps the engagement-vs-impairment rule. `swarm doctor` renders the template and reports errors; the builder round-trips the key.
 - `orchestrator.max_findings_chars` and `orchestrator.max_peer_chars` (documented as commented defaults in `swarm_config.yml`).
 - `model.pricing: {input_per_m, output_per_m}` for the cost estimate in `run_metrics.json`; defaults stay at gpt-4o list prices.

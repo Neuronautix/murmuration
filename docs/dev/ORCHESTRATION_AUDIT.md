@@ -30,9 +30,43 @@ behaviour on every supported version.
 template (default in `automation/config.py`), rendered once at build time and validated by
 `swarm doctor`; `output_sections` in the toxicology and HCM examples is now read by it.
 
-Still open (strict `xfail` tests remain): **B4** (tool rounds exhausted → empty output), **B5** (HITL replays LLM calls), **R1** (findings
-overwritten on re-dispatch), **R3** (one failed branch aborts the run), plus the design items
-I1–I6 and R2, R5, R6, R9, R10.
+**B4, B5, R1 and R3** were fixed in a third follow-up, together with three defects found
+while fixing them (B13–B15 below):
+
+- **B4.** When the tool budget runs out, one extra call to the same model *without tools*
+  receives a plain-text digest of the tool results and writes the answer. Plain text is used
+  rather than replaying tool messages because some providers reject tool messages in a request
+  that defines no tools. An empty draft is rejected without a reviewer LLM call. If it is still
+  empty at `max_revision_loops`, the run ends with `final_status: failed` and `execute` exits 1.
+- **B5.** `post_plan`, `pre_journalist` and `on_rejection` are now separate nodes that make no
+  LLM calls. LangGraph re-runs an interrupted node from its start on resume, so the plan or
+  verdict the user answered is the one executed. A run through all three checkpoints makes
+  exactly one routing call and one reviewer call per draft.
+- **R1.** A re-dispatched specialist writes its new findings first and keeps the earlier
+  rounds under an `[Earlier findings from …]` marker. Newest-first keeps the latest round
+  visible in truncated views.
+- **R3.** `orchestrator.on_agent_failure: continue` (default) records an `[AGENT FAILED]`
+  note for a specialist or Journalist whose model call raises, so parallel siblings keep
+  their findings. An unusable routing reply is retried once. If the retry also fails and
+  findings exist, they go to the Journalist; with no findings the error is raised. `abort`
+  restores fail-fast behaviour. Client-level HTTP retries already exist in the provider SDKs
+  (`max_retries=2` by default), so no retry key was added.
+
+New findings fixed in the same pass:
+
+| ID | Sev. | Location (before the fix) | Failure scenario | Fix |
+| --- | --- | --- | --- | --- |
+| B13 | bug | `graph.py` Journalist node | The Journalist's first-draft prompt never included `next_instructions`, so the orchestrator's instructions **and the user's `pre_journalist` framing were silently dropped**. The checkpoint had no effect. | Orchestrator instructions are stored as `journalist_instructions` and framing as `user_framing`; both are shown on every draft, revisions included. |
+| B14 | bug | `graph.py` orchestrator | A decision such as `["A", "A"]` sent two `Send`s to A, which ran twice and overwrote itself. | Targets are de-duplicated. |
+| B15 | bug | `automation/builder/models.py`, `loader.py` | Every builder command that rewrites `swarm_config.yml` dropped keys the spec does not model: `output_sections` (which the toxicology and HCM briefs read), `reviewer.custom_prompt`, `reviewer.model.provider`/`env_key` (a cross-provider reviewer silently reverted to the base provider), and the new orchestrator and `model.pricing` keys. | The loader records unmodelled values and `to_config()` writes them back. A value is only restored while its parent block still exists, so clearing the reviewer model also clears its provider. |
+| — | bug | `graph.py` reviewer and node outputs | Content returned as a list of blocks (Anthropic-style) was compared with `startswith`/sliced as a string. | `_message_text()` normalises message content everywhere. |
+
+All 85 tests in the suite pass and no `xfail` markers remain. Every new or rewritten test
+was run against the pre-fix commit and fails there.
+
+Still open: the design items **I1–I6** and **R2, R5, R6, R9, R10** (reviewer-to-orchestrator
+evidence loop, structured findings, persistent checkpointer, run log, fan-out limit, reviewer
+context). R2 is partly addressed: a force-approved draft is now reported as such by `execute`.
 
 ---
 

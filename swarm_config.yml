@@ -38,6 +38,9 @@ swarm:
 #                           orchestrator when it decides the next step (default 1500)
 # max_peer_chars:           characters of each colleague's findings shown to a
 #                           specialist as context (default 600)
+# on_agent_failure:         what to do when an agent's model call fails (default
+#                           "continue": record the failure and keep the other
+#                           findings; "abort": stop the run on the first error)
 orchestrator:
   agent: "Orchestrator"
   journalist: "Journalist"
@@ -45,6 +48,7 @@ orchestrator:
   max_tool_rounds_per_agent: 5
   # max_findings_chars: 1500
   # max_peer_chars: 600
+  # on_agent_failure: continue
 
 # ── LLM Backend ─────────────────────────────────────
 # Supported providers: openai, anthropic, google

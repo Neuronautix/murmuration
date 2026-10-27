@@ -305,14 +305,17 @@ def _handle_hitl_interrupt(interrupt_objs) -> str:
     return answer
 
 
-async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict) -> dict:
+async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict) -> tuple[dict, str]:
     """Async inner loop: streams the compiled graph and handles HITL interrupts.
 
-    Returns accumulated token_usage dict.
+    Returns (accumulated token_usage dict, final_status). final_status is the
+    last value any node reported: approved | force_approved | overridden |
+    completed | failed, or "" if no node set one.
     Specialist and Journalist nodes are async (using _run_tool_loop_async) so
     multiple tool calls within a single agent turn run concurrently.
     """
     final_token_usage: dict = {}
+    final_status = ""
     current_input: dict | Command = {
         "task": prompt,
         "messages": [],
@@ -320,9 +323,14 @@ async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict) -
         "agent_assignments": {},
         "next_agents": [],
         "next_instructions": "",
+        "journalist_instructions": "",
+        "user_framing": "",
+        "routing_reasoning": "",
+        "plan_reviewed": False,
         "agent_call_count": 0,
         "reviewer_approved": False,
         "revision_count": 0,
+        "final_status": "",
         "token_usage": {},
     }
 
@@ -342,6 +350,8 @@ async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict) -
                     for k, v in update["token_usage"].items():
                         if isinstance(v, (int, float)):
                             final_token_usage[k] = final_token_usage.get(k, 0) + v
+                if isinstance(update, dict) and update.get("final_status"):
+                    final_status = update["final_status"]
 
             # Check for interrupt before displaying messages
             if "__interrupt__" in event:
@@ -356,7 +366,7 @@ async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict) -
         if not interrupted:
             break  # Graph completed naturally
 
-    return final_token_usage
+    return final_token_usage, final_status
 
 
 def _run_graph(config: dict, prompt: str) -> None:
@@ -406,18 +416,36 @@ def _run_graph(config: dict, prompt: str) -> None:
         run_config["configurable"] = {"thread_id": str(uuid.uuid4())}
 
     try:
-        final_token_usage = asyncio.run(
+        final_token_usage, final_status = asyncio.run(
             _run_graph_async(config, prompt, graph, run_config)
         )
     except Exception as e:
         typer.secho(f"\nExecution Error: {e}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
-    typer.secho("\n✅ Task complete.", fg=typer.colors.GREEN)
     output_dir = resolve_swarm_path(config, "output_dir")
-    typer.secho(f"📂 Outputs saved to '{output_dir}/'", fg=typer.colors.CYAN)
-
     _write_run_metrics(config, prompt, final_token_usage)
+
+    if final_status == "failed":
+        typer.secho(
+            "\n❌ Run finished without a usable draft: the Journalist produced no text. "
+            "See the messages above for agent failures.",
+            fg=typer.colors.RED,
+        )
+        typer.secho(f"📂 Partial outputs, if any, are in '{output_dir}/'", fg=typer.colors.CYAN)
+        raise typer.Exit(code=1)
+
+    if final_status == "force_approved":
+        typer.secho(
+            "\n⚠️  Task complete, but Reviewer-2 never approved the draft: it was force-approved "
+            "after reviewer.max_revision_loops rejections. Review it before use.",
+            fg=typer.colors.YELLOW,
+        )
+    elif final_status == "overridden":
+        typer.secho("\n✅ Task complete (draft approved by user override).", fg=typer.colors.GREEN)
+    else:
+        typer.secho("\n✅ Task complete.", fg=typer.colors.GREEN)
+    typer.secho(f"📂 Outputs saved to '{output_dir}/'", fg=typer.colors.CYAN)
 
 
 def _supported_blueprints_text() -> str:

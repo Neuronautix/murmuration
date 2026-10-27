@@ -213,7 +213,11 @@ hitl:
 
 At `post_plan`, type `APPROVE`, or exact persona names separated by commas to replace the
 plan (for example `LitScout, Journalist`). Anything else you type is passed to the agents
-as a `USER REDIRECT` note without changing the plan.
+as a `USER REDIRECT` note without changing the plan. Framing typed at `pre_journalist` is
+shown to the Journalist on every draft, revisions included.
+
+Each checkpoint is its own graph node and makes no model calls, so answering a checkpoint
+never re-runs the orchestrator or the reviewer: what you approve is what runs.
 
 ---
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automation.builder.models import PersonaSpec, SwarmSpec, ToolSpec
+from automation.builder.models import PersonaSpec, SwarmSpec, ToolSpec, collect_extra_config
 from automation.config import load_config
 
 
@@ -82,7 +82,7 @@ def load_swarm_spec_from_disk(root_dir: Path) -> SwarmSpec:
     orchestrator = config.get("orchestrator", {})
     hitl = config.get("hitl", {})
 
-    return SwarmSpec(
+    spec = SwarmSpec(
         swarm_name=swarm.get("name", "Swarm"),
         swarm_description=swarm.get("description", "Generated swarm"),
         domain=swarm.get("name", "General Research"),
@@ -111,3 +111,6 @@ def load_swarm_spec_from_disk(root_dir: Path) -> SwarmSpec:
         journalist_brief=(config.get("journalist") or {}).get("brief"),
         tool_registry=tool_registry,
     )
+    # Keep every config value the spec does not model, so a builder rewrite of
+    # swarm_config.yml preserves it (see SwarmSpec.extra_config).
+    return spec.model_copy(update={"extra_config": collect_extra_config(config, spec.to_config())})

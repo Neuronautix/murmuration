@@ -48,6 +48,13 @@ def load_config(config_path: Path = CONFIG_PATH) -> dict:
             f"Please refer to the example configuration."
         )
 
+    failure_policy = (config.get("orchestrator") or {}).get("on_agent_failure", "continue")
+    if failure_policy not in ("continue", "abort"):
+        raise ValueError(
+            f"swarm_config.yml: orchestrator.on_agent_failure must be 'continue' or 'abort', "
+            f"not {failure_policy!r}."
+        )
+
     journalist = config.get("journalist")
     if journalist is not None:
         if not isinstance(journalist, dict):

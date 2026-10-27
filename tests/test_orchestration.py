@@ -4,8 +4,9 @@ Offline tests for the orchestration control flow in automation/graph.py.
 Written for docs/dev/ORCHESTRATION_AUDIT.md. Every test runs the real compiled
 LangGraph with fake chat models — no API keys, no network.
 
-Two kinds of tests live here (findings B1, B3, B6–B10 and R4 from the audit
-were fixed in the quick-win pass, so their tests now run as plain regression tests):
+Two kinds of tests live here. Every finding reproduced here has since been
+fixed (quick-win pass, the journalist.brief change, and the B4/B5/R1/R3 pass), so
+all of them now run as plain regression tests:
 
 * plain tests document behaviour that is correct today (bounds, merging,
   fallbacks) so a refactor cannot silently change it;
@@ -23,7 +24,13 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.tools import tool
 from langgraph.types import Command
 
-from automation.graph import AgentAssignment, OrchestratorDecision, build_graph, make_orchestrator_node
+from automation.graph import (
+    AgentAssignment,
+    OrchestratorDecision,
+    build_graph,
+    make_orchestrator_node,
+    make_post_plan_node,
+)
 
 # ── Harness ────────────────────────────────────────────────────────────────
 
@@ -80,19 +87,33 @@ class ScriptedRouter:
         return d
 
 
+class _BoundFakeChat:
+    """What ``FakeChat.bind_tools()`` returns: the same fake, with tools bound."""
+
+    def __init__(self, parent):
+        self.parent = parent
+
+    async def ainvoke(self, msgs, **kwargs):
+        return await self.parent.ainvoke(msgs, _bound=True)
+
+
 class FakeChat:
     """Stands in for the base chat model shared by specialists and the Journalist.
 
     Identifies the calling persona from its system prompt. ``fail_for`` names
-    personas whose LLM call raises; ``tool_calls`` controls whether every answer
-    requests ``dummy_tool`` (so the tool loop never terminates on its own).
+    personas whose LLM call raises; ``empty_for`` names personas that reply with
+    empty text. ``tool_calls`` makes every reply *from a tool-bound model*
+    request ``dummy_tool`` (so the tool loop never terminates on its own); like a
+    real model, the unbound base model never emits tool calls.
     """
 
-    def __init__(self, decisions, fail_for=(), tool_calls=False):
+    def __init__(self, decisions, fail_for=(), tool_calls=False, empty_for=()):
         self.decisions = decisions
         self.router = None
         self.calls = []  # (persona_name, messages)
+        self.bound_flags = []  # parallel to calls: True when the call came through bind_tools()
         self.fail_for = set(fail_for)
+        self.empty_for = set(empty_for)
         self.tool_calls = tool_calls
         self.n = 0
 
@@ -101,7 +122,7 @@ class FakeChat:
         return self.router
 
     def bind_tools(self, tools, **kwargs):
-        return self
+        return _BoundFakeChat(self)
 
     @staticmethod
     def persona(msgs):
@@ -115,13 +136,16 @@ class FakeChat:
     def count(self, name):
         return sum(1 for n, _ in self.calls if n == name)
 
-    async def ainvoke(self, msgs, **kwargs):
+    async def ainvoke(self, msgs, _bound=False, **kwargs):
         name = self.persona(msgs)
         self.calls.append((name, msgs))
+        self.bound_flags.append(_bound)
         self.n += 1
         if name in self.fail_for:
             raise RuntimeError(f"simulated API failure in {name}")
-        if self.tool_calls:
+        if name in self.empty_for:
+            return AIMessage(content="", usage_metadata=USAGE)
+        if self.tool_calls and _bound:
             return AIMessage(content="", usage_metadata=USAGE,
                              tool_calls=[{"name": "dummy_tool", "args": {"x": "1"}, "id": f"c{self.n}"}])
         return AIMessage(content=f"findings from {name} #{self.n}", usage_metadata=USAGE)
@@ -289,7 +313,6 @@ def test_stale_assignment_is_not_reused_on_a_later_dispatch():
     assert "NEW-SHARED" in second and "OLD-A" not in second
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT R1: agent_outputs reducer keeps only the latest text per persona")
 def test_same_specialist_twice_keeps_both_rounds_of_findings():
     chat = FakeChat([decision(["A"], "round1"), decision(["A"], "round2"), decision(["Journalist"])])
     graph = build(make_config(), chat)
@@ -380,30 +403,32 @@ def test_custom_journalist_brief_is_rendered_with_config_variables():
 # ── 4. Robustness ──────────────────────────────────────────────────────────
 
 
-def test_structured_output_failure_propagates_and_aborts_the_run():
-    """Documents audit R3: there is no retry around the routing call."""
+def test_routing_failure_with_no_findings_is_retried_once_then_raised():
+    """AUDIT R3: an unusable routing reply is retried; with nothing to write up, the run stops."""
     chat = FakeChat([ValueError("Failed to parse OrchestratorDecision")])
     graph = build(make_config(), chat)
     with pytest.raises(ValueError, match="OrchestratorDecision"):
         run(graph)
+    assert len(chat.router.calls) == 2
+    assert "could not be used" in chat.router.calls[1][1].content
 
 
-@pytest.mark.xfail(strict=True, raises=RuntimeError,
-                   reason="AUDIT R3: a model error in one parallel branch aborts the whole run; "
-                          "the sibling's findings are lost")
 def test_one_failed_parallel_branch_keeps_the_other_findings():
+    """AUDIT R3: a model error in one branch is recorded; the sibling's findings survive."""
     chat = FakeChat([decision(["A", "B"], assignments={"A": "a", "B": "b"}), decision(["Journalist"])],
                     fail_for={"B"})
     graph = build(make_config(), chat)
     state = run(graph)
     assert "findings from A" in state["agent_outputs"]["A"]
-    assert "Journalist" in state["agent_outputs"]
+    assert state["agent_outputs"]["B"].startswith("[AGENT FAILED] B: RuntimeError: simulated API failure")
+    assert "[AGENT FAILED] B" in chat.human("Journalist")
+    assert state["final_status"] == "approved"
 
 
 def test_tool_exception_is_returned_to_the_agent_not_raised():
     """AUDIT B7: ToolNode(handle_tool_errors=True) turns a raising tool into a ToolMessage."""
     class ToolOnce(FakeChat):
-        async def ainvoke(self, msgs, **kwargs):
+        async def ainvoke(self, msgs, _bound=False, **kwargs):
             name = self.persona(msgs)
             self.calls.append((name, msgs))
             seen = [m for m in msgs if isinstance(m, ToolMessage)]
@@ -418,26 +443,30 @@ def test_tool_exception_is_returned_to_the_agent_not_raised():
     assert "tool exploded" in state["agent_outputs"]["A"]
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT B4: when max_tool_rounds_per_agent is exhausted the last "
-                                       "AIMessage is a tool call with empty content, so the specialist "
-                                       "reports nothing")
 def test_exhausted_tool_rounds_still_yield_findings():
+    """AUDIT B4: after the last tool round, one unbound call writes the answer from the tool results."""
     chat = FakeChat([decision(["A"]), decision(["Journalist"])], tool_calls=True)
     graph = build(make_config(max_rounds=2), chat, tools_for={"A": [dummy_tool]})
     state = run(graph)
-    assert chat.count("A") >= 2
-    assert state["agent_outputs"]["A"].strip() != ""
+    a_flags = [bound for (name, _), bound in zip(chat.calls, chat.bound_flags) if name == "A"]
+    assert a_flags == [True, True, False]           # 2 tool rounds, then the no-tools summary
+    summary_prompt = chat.human("A", index=2)
+    assert "TOOL-CALL LIMIT REACHED" in summary_prompt
+    assert "[Result of dummy_tool]\ntool result" in summary_prompt
+    assert state["agent_outputs"]["A"] == "findings from A #3"
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT B4: an empty Journalist draft is auto-approved without review")
 def test_empty_journalist_draft_is_not_auto_approved():
-    chat = FakeChat([decision(["Journalist"])], tool_calls=True)
-    reviewer = FakeReviewer(["REJECTED: empty"])
-    graph = build(make_config(max_rounds=2), chat, reviewer, tools_for={"Journalist": [dummy_tool]})
+    """AUDIT B4: an empty draft is rejected without an LLM call, and the run fails if it stays empty."""
+    chat = FakeChat([decision(["Journalist"])], empty_for={"Journalist"})
+    reviewer = FakeReviewer(["APPROVED"])
+    graph = build(make_config(max_rev=2), chat, reviewer)
     state = run(graph)
-    assert state["agent_outputs"]["Journalist"].strip() == ""  # the draft really is empty…
-    assert len(reviewer.calls) >= 1                             # …so the reviewer must see it, or
-    assert state["reviewer_approved"] is False                  # the run must not report success
+    assert chat.count("Journalist") == 3            # initial draft + 2 revisions, all empty
+    assert len(reviewer.calls) == 0                 # nothing to review, so no reviewer LLM call
+    assert state["reviewer_approved"] is False
+    assert state["final_status"] == "failed"
+    assert "produced no draft text" in chat.human("Journalist", index=1)
 
 
 # ── 5. HITL ────────────────────────────────────────────────────────────────
@@ -455,9 +484,6 @@ def test_hitl_post_plan_interrupts_and_resumes():
     assert "Journalist" in final["agent_outputs"]
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT B5: interrupt() sits after the routing LLM call in the same node, "
-                                       "so resuming re-runs the LLM and may execute a different plan than the "
-                                       "one the user approved")
 def test_hitl_resume_executes_the_plan_the_user_approved():
     cfg = make_config(hitl={"enabled": True, "checkpoints": ["post_plan"]})
     chat = FakeChat([decision(["A"]), decision(["B"]), decision(["Journalist"])])
@@ -465,13 +491,13 @@ def test_hitl_resume_executes_the_plan_the_user_approved():
     rc = {"configurable": {"thread_id": "t2"}}
     paused = run(graph, config=rc)
     assert "['A']" in paused["__interrupt__"][0].value["question"]
+    assert len(chat.router.calls) == 1
     resume(graph, "APPROVE", rc)
-    assert chat.count("A") == 1, "approved plan was A, but A never ran"
-    assert len(chat.router.calls) == 1, "routing LLM was called again on resume"
+    # Before the fix the resume re-ran the router, which then picked B: the order was [B, Journalist].
+    assert [name for name, _ in chat.calls] == ["A", "B", "Journalist"]
+    assert len(chat.router.calls) == 3      # one per orchestrator pass, none replayed
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT B5: the reviewer LLM is replayed on resume; a replayed APPROVED "
-                                       "discards the user's REVISE answer")
 def test_hitl_on_rejection_resume_honours_the_users_choice():
     cfg = make_config(hitl={"enabled": True, "checkpoints": ["on_rejection"]})
     chat = FakeChat([decision(["Journalist"])])
@@ -485,27 +511,38 @@ def test_hitl_on_rejection_resume_honours_the_users_choice():
     assert chat.count("Journalist") == 2
 
 
+def planned_state(plan, instructions="original", assignments=None, call_count=None):
+    state = initial_state()
+    state.update({
+        "next_agents": plan, "next_instructions": instructions, "agent_assignments": assignments or {},
+        "agent_call_count": len(plan) if call_count is None else call_count, "routing_reasoning": "r",
+    })
+    return state
+
+
+def post_plan(answer, specialists, state):
+    cfg = make_config(specialists=specialists, hitl={"enabled": True, "checkpoints": ["post_plan"]})
+    with patch("automation.graph.interrupt", return_value=answer):
+        return make_post_plan_node(cfg, list(specialists))(state)
+
+
 def test_hitl_override_does_not_dispatch_agents_the_user_asked_to_skip():
-    cfg = make_config(specialists=("LitScout", "B"), hitl={"enabled": True, "checkpoints": ["post_plan"]})
-    router = ScriptedRouter([decision(["B"])])
-    with patch("automation.config.load_persona_content", return_value="p"), \
-         patch("automation.graph.interrupt", return_value="Skip LitScout, go straight to the Journalist"):
-        node = make_orchestrator_node(cfg, ["LitScout", "B"], router, cfg["hitl"])
-        out = node(initial_state())
-    assert "LitScout" not in out["next_agents"]
+    out = post_plan("Skip LitScout, go straight to the Journalist", ("LitScout", "B"), planned_state(["B"]))
+    assert "next_agents" not in out            # plan unchanged: no exact agent names given
+    assert "USER REDIRECT: Skip LitScout, go straight to the Journalist" in out["next_instructions"]
 
 
 def test_hitl_free_text_without_agent_names_becomes_a_redirect_note():
     """AUDIT R14: a redirect that names no agent keeps the plan but is appended to the instructions."""
-    cfg = make_config(specialists=("Alpha", "Beta"), hitl={"enabled": True, "checkpoints": ["post_plan"]})
-    router = ScriptedRouter([decision(["Beta"], instructions="original")])
-    with patch("automation.config.load_persona_content", return_value="p"), \
-         patch("automation.graph.interrupt", return_value="please focus on epidemiology instead"):
-        node = make_orchestrator_node(cfg, ["Alpha", "Beta"], router, cfg["hitl"])
-        out = node(initial_state())
-    assert out["next_agents"] == ["Beta"]
+    out = post_plan("please focus on epidemiology instead", ("Alpha", "Beta"),
+                    planned_state(["Beta"], assignments={"Beta": "beta-task"}))
+    assert "next_agents" not in out
     assert out["next_instructions"].startswith("original")
     assert "USER REDIRECT: please focus on epidemiology instead" in out["next_instructions"]
+    # Specialists read their assignment first, so the note must reach it too.
+    assert out["agent_assignments"]["Beta"].startswith("beta-task")
+    assert "USER REDIRECT" in out["agent_assignments"]["Beta"]
+    assert out["plan_reviewed"] is True
 
 
 # ── 6. Cost and observability ──────────────────────────────────────────────
@@ -563,14 +600,10 @@ def test_specialists_told_to_log_traceability_have_the_tool():
 
 
 def test_hitl_override_with_exact_names_dispatches_those_agents():
-    cfg = make_config(specialists=("LitScout", "Beta"), hitl={"enabled": True, "checkpoints": ["post_plan"]})
-    router = ScriptedRouter([decision(["Beta"], instructions="original")])
-    with patch("automation.config.load_persona_content", return_value="p"), \
-         patch("automation.graph.interrupt", return_value="litscout, Journalist; and keep it short"):
-        node = make_orchestrator_node(cfg, ["LitScout", "Beta"], router, cfg["hitl"])
-        out = node(initial_state())
+    out = post_plan("litscout, Journalist; and keep it short", ("LitScout", "Beta"), planned_state(["Beta"]))
     assert out["next_agents"] == ["LitScout", "Journalist"]
-    assert out["agent_call_count"] == 1
+    assert out["agent_call_count"] == 1        # Beta's dispatch replaced by LitScout's
+    assert out["agent_assignments"] == {}
     assert "USER REDIRECT: and keep it short" in out["next_instructions"]
 
 
@@ -727,3 +760,201 @@ def test_builder_spec_round_trips_journalist_brief(tmp_path):
     assert spec.to_config()["journalist"] == {"brief": original}
     spec_without = spec.model_copy(update={"journalist_brief": None})
     assert "journalist" not in spec_without.to_config()
+
+# ── 10. Failure handling, HITL nodes and builder passthrough (B4, B5, B13, R1, R3) ──
+
+
+def test_hitl_pre_journalist_framing_and_orchestrator_instructions_reach_every_draft():
+    """AUDIT B13: the Journalist never saw the orchestrator's instructions or the user's framing."""
+    cfg = make_config(hitl={"enabled": True, "checkpoints": ["pre_journalist"]})
+    chat = FakeChat([decision(["Journalist"], instructions="ORCH-FOCUS-ON-X")])
+    graph = build(cfg, chat, FakeReviewer(["REJECTED: fix", "APPROVED"]))
+    rc = {"configurable": {"thread_id": "b13"}}
+    paused = run(graph, config=rc)
+    assert paused["__interrupt__"][0].value["checkpoint"] == "pre_journalist"
+    resume(graph, "AUDIENCE-IS-REGULATORS", rc)
+    first, second = chat.human("Journalist", 0), chat.human("Journalist", 1)
+    assert "INSTRUCTIONS FROM THE ORCHESTRATOR:\nORCH-FOCUS-ON-X" in first
+    assert "AUDIENCE-IS-REGULATORS" in first and "AUDIENCE-IS-REGULATORS" in second
+    assert "ORCH-FOCUS-ON-X" in second
+
+
+def test_hitl_checkpoints_run_as_separate_nodes_without_llm_calls():
+    cfg = make_config(hitl={"enabled": True, "checkpoints": ["post_plan", "pre_journalist", "on_rejection"]})
+    chat = FakeChat([decision(["Journalist"])])
+    reviewer = FakeReviewer(["REJECTED: x", "APPROVED"])
+    graph = build(cfg, chat, reviewer)
+    rc = {"configurable": {"thread_id": "nodes"}}
+    paused = run(graph, config=rc)
+    seen = [paused["__interrupt__"][0].value["checkpoint"]]
+    for answer in ["APPROVE", "", "REVISE"]:
+        paused = resume(graph, answer, rc)
+        if "__interrupt__" in paused:
+            seen.append(paused["__interrupt__"][0].value["checkpoint"])
+    assert seen == ["post_plan", "pre_journalist", "on_rejection"]
+    assert len(chat.router.calls) == 1          # never replayed across three resumes
+    assert len(reviewer.calls) == 2             # one per draft, never replayed
+    assert paused["final_status"] == "approved" and paused["revision_count"] == 1
+
+
+def test_hitl_on_rejection_override_ends_the_run_as_overridden():
+    cfg = make_config(hitl={"enabled": True, "checkpoints": ["on_rejection"]})
+    chat = FakeChat([decision(["Journalist"])])
+    graph = build(cfg, chat, FakeReviewer(["REJECTED: x"]))
+    rc = {"configurable": {"thread_id": "ovr"}}
+    run(graph, config=rc)
+    final = resume(graph, "OVERRIDE", rc)
+    assert final["reviewer_approved"] is True and final["final_status"] == "overridden"
+    assert chat.count("Journalist") == 1
+
+
+def test_hitl_on_rejection_custom_instructions_replace_reviewer_feedback():
+    cfg = make_config(hitl={"enabled": True, "checkpoints": ["on_rejection"]})
+    chat = FakeChat([decision(["Journalist"])])
+    graph = build(cfg, chat, FakeReviewer(["REJECTED: reviewer text", "APPROVED"]))
+    rc = {"configurable": {"thread_id": "custom"}}
+    run(graph, config=rc)
+    resume(graph, "Shorten the summary to 200 words", rc)
+    second = chat.human("Journalist", index=1)
+    assert "Shorten the summary to 200 words" in second and "reviewer text" not in second
+
+
+def test_routing_reply_retried_once_after_an_unusable_reply():
+    chat = FakeChat([ValueError("bad json"), decision(["A"]), decision(["Journalist"])])
+    graph = build(make_config(), chat)
+    state = run(graph)
+    assert chat.count("A") == 1
+    assert "routing retried after an unusable reply" in state["messages"][0].content
+
+
+def test_routing_failing_twice_after_findings_hands_them_to_the_journalist():
+    chat = FakeChat([decision(["A"]), ValueError("bad 1"), ValueError("bad 2")])
+    graph = build(make_config(), chat)
+    state = run(graph)
+    assert state["final_status"] == "approved"
+    assert "findings from A" in chat.human("Journalist")
+    assert any("routing failed twice" in m.content for m in state["messages"])
+
+
+def test_abort_policy_restores_fail_fast_behaviour():
+    cfg = make_config()
+    cfg["orchestrator"]["on_agent_failure"] = "abort"
+    chat = FakeChat([decision(["A", "B"], assignments={"A": "a", "B": "b"})], fail_for={"B"})
+    with pytest.raises(RuntimeError, match="simulated API failure in B"):
+        run(build(cfg, chat))
+    chat = FakeChat([ValueError("bad json")])
+    with pytest.raises(ValueError):
+        run(build(cfg, chat))
+    assert len(chat.router.calls) == 1          # no retry under abort
+
+
+def test_load_config_rejects_unknown_failure_policy(tmp_path):
+    import yaml
+
+    from automation.config import CONFIG_PATH, load_config
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["orchestrator"]["on_agent_failure"] = "ignore"
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    with pytest.raises(ValueError, match="on_agent_failure"):
+        load_config(tmp_path / "swarm_config.yml")
+
+
+def test_journalist_failure_is_retried_through_the_reviewer_then_fails_the_run():
+    chat = FakeChat([decision(["A"]), decision(["Journalist"])], fail_for={"Journalist"})
+    reviewer = FakeReviewer(["APPROVED"])
+    state = run(build(make_config(max_rev=1), chat, reviewer))
+    assert chat.count("Journalist") == 2
+    assert len(reviewer.calls) == 0
+    assert state["final_status"] == "failed"
+    assert "findings from A" in state["agent_outputs"]["A"]     # evidence kept for the user
+    assert any("[AGENT FAILED] Journalist" in m.content for m in state["messages"])
+
+
+def test_journalist_failure_without_reviewer_reports_failed():
+    chat = FakeChat([decision(["Journalist"])], fail_for={"Journalist"})
+    state = run(build(make_config(reviewer_enabled=False), chat))
+    assert state["final_status"] == "failed"
+
+
+def test_duplicate_targets_are_dispatched_once():
+    chat = FakeChat([decision(["A", "A"]), decision(["Journalist"])])
+    state = run(build(make_config(), chat))
+    assert chat.count("A") == 1 and state["agent_call_count"] == 1
+
+
+def test_combine_findings_keeps_rounds_newest_first_and_drops_failure_notes():
+    from automation.graph import FAILED_PREFIX, _combine_findings
+    assert _combine_findings("A", "", "r1") == "r1"
+    assert _combine_findings("A", "r1", "r2") == "r2\n\n[Earlier findings from A]\nr1"
+    assert _combine_findings("A", f"{FAILED_PREFIX} A: boom", "r2") == "r2"
+    failed_later = _combine_findings("A", "r1", f"{FAILED_PREFIX} A: boom")
+    assert failed_later.startswith(FAILED_PREFIX) and failed_later.endswith("r1")
+
+
+def test_message_text_handles_block_lists():
+    from automation.graph import _message_text
+    msg = AIMessage(content=[{"type": "text", "text": "APPROVED"}, {"type": "tool_use", "id": "x"}])
+    assert _message_text(msg) == "APPROVED"
+    assert _message_text(AIMessage(content="plain")) == "plain"
+
+
+def test_reviewer_accepts_block_list_content():
+    class BlockReviewer(FakeReviewer):
+        def invoke(self, msgs):
+            self.calls.append(msgs)
+            return AIMessage(content=[{"type": "text", "text": "APPROVED"}])
+
+    reviewer = BlockReviewer()
+    state = run(build(make_config(), FakeChat([decision(["Journalist"])]), reviewer))
+    assert state["final_status"] == "approved"
+
+
+def test_recursion_limit_grows_with_hitl_checkpoints():
+    from automation.graph import compute_recursion_limit
+    plain = compute_recursion_limit(make_config(max_rev=3))
+    all_on = compute_recursion_limit(make_config(max_rev=3, hitl={
+        "enabled": True, "checkpoints": ["post_plan", "pre_journalist", "on_rejection"]}))
+    assert all_on == plain + 2 + 3
+
+
+def test_run_loop_reports_final_status():
+    from automation.main import _run_graph_async
+    graph = build(make_config(max_rev=1), FakeChat([decision(["Journalist"])]), FakeReviewer(["REJECTED: n"]))
+    usage, status = asyncio.run(_run_graph_async(make_config(), "task", graph, {}))
+    assert status == "force_approved"
+    assert usage["total_tokens"] > 0
+
+
+def test_builder_round_trip_preserves_unmodelled_keys(tmp_path):
+    """Builder commands rewrite swarm_config.yml from the spec; keys it does not model must survive."""
+    import shutil
+    from pathlib import Path
+
+    import yaml
+
+    from automation.builder.generator import render_swarm_config
+    from automation.builder.loader import load_swarm_spec_from_disk
+    root = Path(__file__).resolve().parents[1]
+    cfg = yaml.safe_load((root / "examples/toxicology/swarm_config.yml").read_text(encoding="utf-8"))
+    cfg["orchestrator"]["on_agent_failure"] = "abort"
+    cfg["orchestrator"]["max_findings_chars"] = 900
+    cfg["model"]["pricing"] = {"input_per_m": 1.0, "output_per_m": 2.0}
+    cfg["reviewer"]["custom_prompt"] = "Be strict."
+    cfg["reviewer"]["model"].update({"provider": "anthropic", "env_key": "ANTHROPIC_API_KEY"})
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    shutil.copytree(root / "examples/toxicology", tmp_path / "examples/toxicology")
+
+    spec = load_swarm_spec_from_disk(tmp_path)
+    out = yaml.safe_load(render_swarm_config(spec))
+    assert out["output_sections"] == cfg["output_sections"]
+    assert out["orchestrator"]["on_agent_failure"] == "abort"
+    assert out["orchestrator"]["max_findings_chars"] == 900
+    assert out["model"]["pricing"] == {"input_per_m": 1.0, "output_per_m": 2.0}
+    assert out["reviewer"]["custom_prompt"] == "Be strict."
+    assert out["reviewer"]["model"]["provider"] == "anthropic"
+    assert out["journalist"] == cfg["journalist"]
+
+    # Clearing the reviewer model in the builder must not leave a half model block behind.
+    cleared = yaml.safe_load(render_swarm_config(spec.model_copy(update={"reviewer_model_name": None})))
+    assert "model" not in cleared["reviewer"]
+    assert cleared["reviewer"]["custom_prompt"] == "Be strict."

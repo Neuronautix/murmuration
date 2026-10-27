@@ -229,6 +229,7 @@ Report modes prepend a structured format instruction to the prompt, which consis
 - Use `max_tool_rounds_per_agent: 3–4` for standard runs; increase to 6–8 only for deep literature mapping tasks.
 - `max_findings_chars` (default 1500) caps how much of each specialist's output the orchestrator re-reads on every routing decision; `max_peer_chars` (default 600) caps what one specialist sees of a colleague's findings. Raise them for dense evidence, lower them to save tokens on long runs.
 - If you change the model, set `model.pricing: {input_per_m, output_per_m}` so the cost estimate in `run_metrics.json` matches your rates (defaults are gpt-4o list prices).
+- By default (`orchestrator.on_agent_failure: continue`) a rate-limit or API error in one agent is recorded as `[AGENT FAILED]` and the run carries on with the other findings. Set `abort` if you would rather stop and rerun than pay for a partial result.
 - Run `make doctor` before a long autonomous run to catch config errors that would cause a failed run at cost.
 - Check `Drafts/run_metrics.json` after each run to track token usage and cost trends.
 
