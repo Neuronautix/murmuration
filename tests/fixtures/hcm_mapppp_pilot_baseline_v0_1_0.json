@@ -1,0 +1,279 @@
+{
+  "package_metadata": {
+    "package_id": "hcmsas-mapppp-20260410T131128Z",
+    "created_at": "2026-04-10T13:11:28+00:00",
+    "created_by": "automation.exporters.mapppp.export_hcm_mapppp_bundle",
+    "contract_name": "MAPPPP",
+    "contract_version": "0.1.0",
+    "domain_type": "hcm"
+  },
+  "study_context": {
+    "species": "mouse"
+  },
+  "metadata_assertions": [
+    {
+      "assertion_id": "traceability-metadata-2",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.methods.2024",
+        "source_anchor": "[1]",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "field": "temporal_structure",
+      "value": "Continuous cage-side HCM can capture circadian locomotor activity in mice"
+    },
+    {
+      "assertion_id": "traceability-metadata-3",
+      "status": "proposed",
+      "epistemic_label": "inferred",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.review.2025",
+        "source_anchor": "[2]",
+        "proposed_by": "Reproducibility and Bias Auditor",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "field": "acquisition_system",
+      "value": "Cross-platform comparisons require explicit sensor equivalence"
+    },
+    {
+      "assertion_id": "mapping-metadata-1-1",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.methods.2024",
+        "source_anchor": "[1]",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "field": "species",
+      "value": "mouse"
+    },
+    {
+      "assertion_id": "mapping-metadata-1-2",
+      "status": "proposed",
+      "epistemic_label": "uncertain",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.review.2025",
+        "source_anchor": "[2]",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "field": "classifier_version",
+      "value": "missing"
+    },
+    {
+      "assertion_id": "metadata-gap-1",
+      "status": "proposed",
+      "epistemic_label": "uncertain",
+      "provenance": {
+        "source_id": "[1]",
+        "source_anchor": "[1]",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "field": "light_cycle_transition_timing",
+      "value": "not reported"
+    },
+    {
+      "assertion_id": "metadata-gap-2",
+      "status": "proposed",
+      "epistemic_label": "uncertain",
+      "provenance": {
+        "source_id": "[2]",
+        "source_anchor": "[2]",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "field": "software_classifier_version_disclosure",
+      "value": "inconsistent"
+    }
+  ],
+  "evidence_assertions": [
+    {
+      "assertion_id": "traceability-evidence-2",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.methods.2024",
+        "source_anchor": "[1]",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "subject": "DOI:10.1000/hcm.methods.2024",
+      "observation": "Continuous cage-side HCM can capture circadian locomotor activity in mice",
+      "value": "Anchored to the methods paper."
+    },
+    {
+      "assertion_id": "traceability-evidence-3",
+      "status": "proposed",
+      "epistemic_label": "inferred",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.review.2025",
+        "source_anchor": "[2]",
+        "proposed_by": "Reproducibility and Bias Auditor",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "subject": "DOI:10.1000/hcm.review.2025",
+      "observation": "Cross-platform comparisons require explicit sensor equivalence",
+      "value": "Comparability risk noted in the review."
+    },
+    {
+      "assertion_id": "evidence-table-1-1",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.methods.2024",
+        "source_anchor": "[1]",
+        "proposed_by": "journalist_evidence_table",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "subject": "methods_paper",
+      "observation": "Continuous cage-side recording can capture circadian locomotor activity in mice",
+      "value": "Preserves the raw measurement versus interpretation distinction"
+    },
+    {
+      "assertion_id": "evidence-table-1-2",
+      "status": "proposed",
+      "epistemic_label": "inferred",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.review.2025",
+        "source_anchor": "[2]",
+        "proposed_by": "journalist_evidence_table",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "subject": "review",
+      "observation": "Cross-platform comparisons require explicit sensor equivalence",
+      "value": "Sensor modality and classifier equivalence must be reported"
+    }
+  ],
+  "mapping_assertions": [
+    {
+      "assertion_id": "mapping-assertion-1-1",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.methods.2024",
+        "source_anchor": "[1]",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "local_field": "species",
+      "target_schema": "MNMS",
+      "target_field": "animal_characteristics",
+      "mapping_rationale": "MNMS_core Reported as C57BL/6J mice",
+      "confidence": 0.95
+    },
+    {
+      "assertion_id": "mapping-assertion-1-2",
+      "status": "proposed",
+      "epistemic_label": "uncertain",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.review.2025",
+        "source_anchor": "[2]",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "local_field": "classifier_version",
+      "target_schema": "MNMS",
+      "target_field": "software_and_classifier",
+      "mapping_rationale": "missing_in_source Review flags missing version disclosure",
+      "confidence": 0.55
+    }
+  ],
+  "graph_assertions": [
+    {
+      "assertion_id": "graph-assertion-1-1",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.methods.2024",
+        "source_anchor": "[1]",
+        "proposed_by": "journalist_graph_schema",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "subject": "Study_001",
+      "predicate": "uses_system",
+      "object": "HCM_System_DVC",
+      "object_type": "HCM_System"
+    },
+    {
+      "assertion_id": "graph-assertion-1-2",
+      "status": "proposed",
+      "epistemic_label": "inferred",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.review.2025",
+        "source_anchor": "[2]",
+        "proposed_by": "journalist_graph_schema",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "subject": "HCM_System_DVC",
+      "predicate": "confounded_by",
+      "object": "Classifier_Version_Gap",
+      "object_type": "Gap"
+    }
+  ],
+  "review_notes": [
+    {
+      "note_id": "risk-note-1-1",
+      "disposition": "flag",
+      "note": "Classifier versions were omitted, limiting reproducibility",
+      "provenance": {
+        "source_id": "[2]",
+        "source_anchor": "[2]",
+        "proposed_by": "Reproducibility and Bias Auditor",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "related_assertion_ids": [
+        "traceability-metadata-3",
+        "mapping-metadata-1-2",
+        "metadata-gap-2",
+        "traceability-evidence-3",
+        "evidence-table-1-2",
+        "mapping-assertion-1-2",
+        "graph-assertion-1-2"
+      ]
+    },
+    {
+      "note_id": "external-review-note-1",
+      "disposition": "comment",
+      "note": "Keep MNMS mappings proposal-level because several core fields remain missing",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.methods.2024",
+        "source_anchor": "[1]",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "related_assertion_ids": [
+        "traceability-metadata-2",
+        "mapping-metadata-1-1",
+        "metadata-gap-1",
+        "traceability-evidence-2",
+        "evidence-table-1-1",
+        "mapping-assertion-1-1",
+        "graph-assertion-1-1"
+      ]
+    },
+    {
+      "note_id": "external-review-note-2",
+      "disposition": "request_changes",
+      "note": "Do not mark classifier-version mappings as accepted or curator-confirmed",
+      "provenance": {
+        "source_id": "DOI:10.1000/hcm.review.2025",
+        "source_anchor": "[2]",
+        "proposed_by": "Reviewer-2",
+        "created_at": "2026-04-10T13:11:28+00:00"
+      },
+      "related_assertion_ids": [
+        "traceability-metadata-3",
+        "mapping-metadata-1-2",
+        "metadata-gap-2",
+        "traceability-evidence-3",
+        "evidence-table-1-2",
+        "mapping-assertion-1-2",
+        "graph-assertion-1-2"
+      ]
+    }
+  ]
+}

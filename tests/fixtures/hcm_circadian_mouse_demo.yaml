@@ -1,0 +1,16 @@
+pilot_name: hcm_circadian_mouse_demo
+research_question: >
+  Which metadata and evidence elements are consistently needed to interpret
+  mouse home-cage circadian locomotor activity studies for MNMS-style reuse?
+pmids:
+  - 39880968
+  - 39371613
+  - 39763604
+  - 39296476
+  - 39534023
+expected_assertions:
+  - metadata
+  - evidence
+  - mapping
+  - graph
+  - review_notes
