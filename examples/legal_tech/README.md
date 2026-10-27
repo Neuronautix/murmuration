@@ -1,6 +1,6 @@
 # Legal Tech Example
 
-A ready-to-run Research Swarm configuration for legal research and brief
+A ready-to-run Murmuration configuration for legal research and brief
 assembly. Produces structured legal memoranda with Bluebook citations,
 adversarial review, and a mandatory Table of Authorities.
 

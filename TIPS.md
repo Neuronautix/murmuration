@@ -1,4 +1,4 @@
-# Tips for Building an Effective Research Swarm
+# Tips for Building an Effective Murmuration Swarm
 
 This guide covers the practical decisions that most affect swarm output quality: team design, knowledge base seeding, reviewer configuration, and literature search strategy.
 

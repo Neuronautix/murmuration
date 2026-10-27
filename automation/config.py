@@ -1,5 +1,5 @@
 """
-config.py — Configuration Engine for the Research Swarm
+config.py — Configuration Engine for Murmuration
 
 Loads swarm_config.yml and dynamically builds:
   - System prompts (from persona files)
