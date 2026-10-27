@@ -2,6 +2,8 @@
 
 > *A murmuration is a flock of starlings that moves as one, with no leader, each bird following a few simple rules. Here, the birds are research agents and the rules live in `swarm_config.yml`.*
 
+> Repository: [Neuronautix/murmuration](https://github.com/Neuronautix/murmuration). Formerly published as **METODAX** (`dhuzard/metodax`) and **Research Swarm**; old GitHub URLs redirect here.
+
 **Murmuration automatically conducts literature reviews and writes research documents.**
 
 Give it a research question. It deploys a team of AI agents that search PubMed, read papers, debate findings across specialisms, and write a structured document with full citations — no programming required.
@@ -50,8 +52,8 @@ The entire team is configured through a single YAML file — `swarm_config.yml`.
 Requirements: Python 3.10+, `python3-venv`, `make`
 
 ```bash
-git clone https://github.com/dhuzard/piu-psych-swarm.git
-cd piu-psych-swarm
+git clone https://github.com/Neuronautix/murmuration.git
+cd murmuration
 make setup
 ```
 
@@ -64,8 +66,8 @@ sudo apt update && sudo apt install -y python3 python3-venv make
 ### Native Windows (PowerShell)
 
 ```powershell
-git clone https://github.com/dhuzard/piu-psych-swarm.git
-cd piu-psych-swarm
+git clone https://github.com/Neuronautix/murmuration.git
+cd murmuration
 py -3 -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
 .\.venv\Scripts\python -m pip install -e ".[dev]"
@@ -208,7 +210,7 @@ hitl:
 ## Repository Layout
 
 ```
-research-swarm/
+murmuration/
 ├── swarm_config.yml          # Active swarm definition — edit this to customize
 ├── agents/                   # Personas and local knowledge bases
 │   ├── Orchestrator/

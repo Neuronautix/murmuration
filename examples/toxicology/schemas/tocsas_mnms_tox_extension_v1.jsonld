@@ -3,7 +3,7 @@
     "schema": "http://schema.org/",
     "prov": "http://www.w3.org/ns/prov#",
     "mms": "https://github.com/dhuzard/piu-psych-swarm/blob/main/schemas/mms_schema_v1.jsonld#",
-    "tocsas": "https://github.com/Neuronautix/research-swarm/blob/main/examples/toxicology/schemas/tocsas_mnms_tox_extension_v1.jsonld#",
+    "tocsas": "https://github.com/Neuronautix/murmuration/blob/main/examples/toxicology/schemas/tocsas_mnms_tox_extension_v1.jsonld#",
     "chebi": "http://purl.obolibrary.org/obo/CHEBI_",
     "uberon": "http://purl.obolibrary.org/obo/UBERON_",
     "ncit": "http://purl.obolibrary.org/obo/NCIT_",

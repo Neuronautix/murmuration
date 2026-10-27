@@ -9,7 +9,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
-- **Renamed the project from Research Swarm to Murmuration.** The Python package is now `murmuration` (`pip show murmuration`) and HTTP tools send `User-Agent: Murmuration/1.0`. The CLI, `swarm_config.yml` schema and repository URLs are unchanged.
+- **Renamed the project from Research Swarm to Murmuration.** The Python package is now `murmuration` (`pip show murmuration`) and HTTP tools send `User-Agent: Murmuration/1.0`. The CLI (`swarm`), import package (`automation`) and `swarm_config.yml` schema are unchanged.
+- Repository moved from `dhuzard/metodax` (METODAX) to `Neuronautix/murmuration`. Project URLs in `pyproject.toml`, `CITATION.cff`, README, QUICKSTART, CONTRIBUTING and FAQ now point to the new location; they previously pointed to `dhuzard/piu-psych-swarm`.
 
 ---
 
