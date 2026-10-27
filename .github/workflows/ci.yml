@@ -4,7 +4,6 @@ on:
   push:
     branches: [main, "claude/**"]
   pull_request:
-    branches: [main]
 
 jobs:
   test:
@@ -25,7 +24,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Lint with ruff
-        run: ruff check automation/
+        run: ruff check .
 
       - name: Run test suite
         run: pytest tests/ -v

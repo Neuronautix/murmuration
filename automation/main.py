@@ -1112,7 +1112,7 @@ def tools_remove(
     typer.secho(f"Removed tool '{target_key}'.", fg=typer.colors.GREEN)
 
 @app.command()
-def execute(prompt: str):
+def execute(prompt: str, config_path: Path = typer.Option(None, "--config", help="Swarm configuration YAML")):
     """
     Execute an autonomous research task with the swarm.
 
@@ -1123,7 +1123,7 @@ def execute(prompt: str):
         python -m automation.main execute "Review the literature on [your research question]."
     """
     try:
-        config = load_config()
+        config = load_config(config_path) if config_path else load_config()
     except (FileNotFoundError, ValueError) as e:
         typer.secho(f"CONFIG ERROR: {e}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
@@ -1134,6 +1134,7 @@ def execute(prompt: str):
 @app.command()
 def report(
     prompt: str,
+    config_path: Path = typer.Option(None, "--config", help="Swarm configuration YAML"),
     mode: str = typer.Option(
         "narrative-review",
         "--mode", "-m",
@@ -1170,7 +1171,7 @@ def report(
         python -m automation.main report "CBT for depression" --mode grant-support
     """
     try:
-        config = load_config()
+        config = load_config(config_path) if config_path else load_config()
     except (FileNotFoundError, ValueError) as e:
         typer.secho(f"CONFIG ERROR: {e}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
