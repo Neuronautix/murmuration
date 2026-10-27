@@ -1,0 +1,340 @@
+{
+  "@context": {
+    "schema": "http://schema.org/",
+    "prov": "http://www.w3.org/ns/prov#",
+    "mms": "https://github.com/dhuzard/piu-psych-swarm/blob/main/schemas/mms_schema_v1.jsonld#",
+    "tocsas": "https://github.com/Neuronautix/research-swarm/blob/main/examples/toxicology/schemas/tocsas_mnms_tox_extension_v1.jsonld#",
+    "chebi": "http://purl.obolibrary.org/obo/CHEBI_",
+    "uberon": "http://purl.obolibrary.org/obo/UBERON_",
+    "ncit": "http://purl.obolibrary.org/obo/NCIT_",
+    "efo": "http://www.ebi.ac.uk/efo/EFO_",
+
+    "StudyContext": "mms:StudyContext",
+    "StudyID": "schema:identifier",
+    "Objective": "schema:description",
+    "GLPStatus": "mms:GLPStatus",
+    "Site": "schema:location",
+    "ProtocolVersion": "schema:version",
+
+    "StudyType": "tocsas:StudyType",
+    "RegulatoryGuideline": "tocsas:RegulatoryGuideline",
+    "GuidelineNumber": "tocsas:GuidelineNumber",
+    "GuidelineVersion": "tocsas:GuidelineVersion",
+
+    "AnimalDescriptors": "mms:AnimalDescriptors",
+    "Species": "mms:Species",
+    "Strain": "mms:Strain",
+    "Sex": "schema:gender",
+    "AgeAtStart": "tocsas:AgeAtStart",
+    "BodyWeightAtStart": "tocsas:BodyWeightAtStart",
+    "Source": "schema:seller",
+    "MicrobiologicalStatus": "mms:MicrobiologicalStatus",
+    "AcclimatizationPeriod": "tocsas:AcclimatizationPeriod",
+
+    "Environment": "mms:Environment",
+    "CageSystem": "mms:CageSystem",
+    "GroupSize": "mms:GroupSize",
+    "Enrichment": "mms:Enrichment",
+    "DietWaterAccess": "mms:DietWaterAccess",
+    "LDCycle": "mms:LDCycle",
+    "Temperature": "tocsas:Temperature",
+    "Humidity": "tocsas:Humidity",
+
+    "TestArticle": "tocsas:TestArticle",
+    "CompoundName": "schema:name",
+    "CASNumber": "tocsas:CASNumber",
+    "BatchLotNumber": "tocsas:BatchLotNumber",
+    "Purity": "tocsas:Purity",
+    "FormulationComposition": "tocsas:FormulationComposition",
+    "FormulationStabilityConfirmed": "tocsas:FormulationStabilityConfirmed",
+    "NominalConcentration": "tocsas:NominalConcentration",
+    "AchievedConcentration": "tocsas:AchievedConcentration",
+
+    "DosingAndExposure": "tocsas:DosingAndExposure",
+    "DoseGroup": "tocsas:DoseGroup",
+    "DoseLevel": "tocsas:DoseLevel",
+    "DoseUnit": "tocsas:DoseUnit",
+    "RouteOfAdministration": "tocsas:RouteOfAdministration",
+    "DosingFrequency": "tocsas:DosingFrequency",
+    "DosingSchedule": "tocsas:DosingSchedule",
+    "DosingDurationDays": "tocsas:DosingDurationDays",
+    "VolumeAdministered": "tocsas:VolumeAdministered",
+    "Vehicle": "tocsas:Vehicle",
+    "VehicleComposition": "tocsas:VehicleComposition",
+    "ConcurrentVehicleControl": "tocsas:ConcurrentVehicleControl",
+    "RecoveryGroupIncluded": "tocsas:RecoveryGroupIncluded",
+    "RecoveryPeriodDays": "tocsas:RecoveryPeriodDays",
+    "SatelliteGroupIncluded": "tocsas:SatelliteGroupIncluded",
+
+    "Toxicokinetics": "tocsas:Toxicokinetics",
+    "TKCollected": "tocsas:TKCollected",
+    "TKSampleType": "tocsas:TKSampleType",
+    "AUC": "tocsas:AUC",
+    "Cmax": "tocsas:Cmax",
+    "Tmax": "tocsas:Tmax",
+    "HalfLife": "tocsas:HalfLife",
+    "Bioavailability": "tocsas:Bioavailability",
+    "AccumulationRatio": "tocsas:AccumulationRatio",
+    "DoseProportionality": "tocsas:DoseProportionality",
+    "NonlinearTKFlag": "tocsas:NonlinearTKFlag",
+
+    "SamplingAndTiming": "mms:TimeAndProvenance",
+    "SamplingTimePoints": "tocsas:SamplingTimePoints",
+    "TerminalSacrificeDay": "tocsas:TerminalSacrificeDay",
+    "NecropsyProcedure": "tocsas:NecropsyProcedure",
+
+    "ClinicalPathology": "tocsas:ClinicalPathology",
+    "HematologyPanel": "tocsas:HematologyPanel",
+    "ClinicalChemistryPanel": "tocsas:ClinicalChemistryPanel",
+    "UrinalysisPanel": "tocsas:UrinalysisPanel",
+    "CoagulationPanel": "tocsas:CoagulationPanel",
+    "AnalyticalMethod": "tocsas:AnalyticalMethod",
+    "HistoricalControlDataAvailable": "tocsas:HistoricalControlDataAvailable",
+
+    "OrganWeights": "tocsas:OrganWeights",
+    "OrgansWeighed": "tocsas:OrgansWeighed",
+    "AbsoluteWeight": "tocsas:AbsoluteWeight",
+    "RelativeToBodyWeight": "tocsas:RelativeToBodyWeight",
+    "RelativeToBrainWeight": "tocsas:RelativeToBrainWeight",
+
+    "Histopathology": "tocsas:Histopathology",
+    "OrgansExamined": "tocsas:OrgansExamined",
+    "PathologyTerm": "tocsas:PathologyTerm",
+    "INHANDNomenclatureUsed": "tocsas:INHANDNomenclatureUsed",
+    "INHANDReference": "tocsas:INHANDReference",
+    "MorphologicalQualifier": "tocsas:MorphologicalQualifier",
+    "SeverityGrade": "tocsas:SeverityGrade",
+    "GradingSystem": "tocsas:GradingSystem",
+    "Distribution": "tocsas:Distribution",
+    "Incidence": "tocsas:Incidence",
+    "TreatmentRelationship": "tocsas:TreatmentRelationship",
+    "PathologistQualification": "tocsas:PathologistQualification",
+    "PathologyPeerReview": "tocsas:PathologyPeerReview",
+
+    "Interpretation": "tocsas:Interpretation",
+    "NOAELMgKgDay": "tocsas:NOAELMgKgDay",
+    "LOAELMgKgDay": "tocsas:LOAELMgKgDay",
+    "AdversityJudgment": "tocsas:AdversityJudgment",
+    "AdversityCriteria": "tocsas:AdversityCriteria",
+    "AdversityCriteriaReference": "tocsas:AdversityCriteriaReference",
+    "AdaptiveVsAdverseClassification": "tocsas:AdaptiveVsAdverseClassification",
+    "ReversibilityAssessment": "tocsas:ReversibilityAssessment",
+    "MechanisticHypothesis": "tocsas:MechanisticHypothesis",
+    "MechanisticEvidenceQuality": "tocsas:MechanisticEvidenceQuality",
+
+    "Statistics": "tocsas:Statistics",
+    "StatisticalMethods": "tocsas:StatisticalMethods",
+    "StatisticalSoftware": "tocsas:StatisticalSoftware",
+    "SignificanceThreshold": "tocsas:SignificanceThreshold",
+
+    "Provenance": "prov:Activity",
+    "StudyStartDate": "prov:startedAtTime",
+    "StudyEndDate": "prov:endedAtTime",
+    "BatchID": "mms:BatchID",
+    "DataVersion": "schema:version",
+    "QAStatus": "tocsas:QAStatus",
+    "AnalysisDate": "tocsas:AnalysisDate",
+    "ResponsibleAnalyst": "prov:wasAttributedTo",
+
+    "MissingMetadata": "tocsas:MissingMetadata",
+    "MissingElement": "tocsas:MissingElement",
+    "MissingElementPriority": "tocsas:MissingElementPriority",
+    "InterpretiveConsequence": "tocsas:InterpretiveConsequence",
+
+    "EpistemicTag": "tocsas:EpistemicTag",
+    "EvidenceSource": "tocsas:EvidenceSource",
+    "PMID": "tocsas:PMID",
+    "DOI": "schema:identifier"
+  },
+  "@graph": [
+    {
+      "@id": "urn:uuid:tocsas-example-study-001",
+      "@type": "StudyContext",
+      "StudyID": "TOX-RAT-EXAMPLE-001",
+      "Objective": "90-Day Oral Toxicity Study — TOCSAS Extension Schema Example",
+      "GLPStatus": "GLP-compliant",
+      "Site": "ExampleContractLab",
+      "ProtocolVersion": "v1.0",
+
+      "StudyType": "subchronic",
+      "RegulatoryGuideline": {
+        "@type": "RegulatoryGuideline",
+        "GuidelineNumber": "OECD 408",
+        "GuidelineVersion": "1998"
+      },
+
+      "AnimalDescriptors": {
+        "@type": "AnimalDescriptors",
+        "Species": "Rattus norvegicus",
+        "Strain": "Sprague Dawley",
+        "Sex": "Male and Female",
+        "AgeAtStart": "7–8 weeks",
+        "BodyWeightAtStart": "200–250 g (male), 160–200 g (female)",
+        "Source": "VendorX",
+        "MicrobiologicalStatus": "SPF",
+        "AcclimatizationPeriod": "7 days"
+      },
+
+      "Environment": {
+        "@type": "Environment",
+        "CageSystem": "Ventilated polycarbonate caging",
+        "GroupSize": 5,
+        "Enrichment": "Standard nesting material",
+        "DietWaterAccess": "Ad libitum",
+        "LDCycle": "12:12 (lights on 06:00)",
+        "Temperature": "22 ± 2°C",
+        "Humidity": "50 ± 20%"
+      },
+
+      "TestArticle": {
+        "@type": "TestArticle",
+        "CompoundName": "CompoundX",
+        "CASNumber": "[TO BE CONFIRMED]",
+        "BatchLotNumber": "LOT-2024-001",
+        "Purity": "99.2%",
+        "FormulationComposition": "0.5% methylcellulose in purified water",
+        "FormulationStabilityConfirmed": true,
+        "NominalConcentration": "[per dose group]",
+        "AchievedConcentration": "[per analysis certificate]"
+      },
+
+      "DosingAndExposure": {
+        "@type": "DosingAndExposure",
+        "DoseGroup": [
+          {"DoseLevel": 0, "DoseUnit": "mg/kg/day", "label": "Vehicle Control"},
+          {"DoseLevel": 10, "DoseUnit": "mg/kg/day", "label": "Low"},
+          {"DoseLevel": 50, "DoseUnit": "mg/kg/day", "label": "Mid"},
+          {"DoseLevel": 200, "DoseUnit": "mg/kg/day", "label": "High"}
+        ],
+        "RouteOfAdministration": "Oral gavage",
+        "DosingFrequency": "Once daily",
+        "DosingSchedule": "7 days/week",
+        "DosingDurationDays": 90,
+        "VolumeAdministered": "10 mL/kg",
+        "Vehicle": "0.5% methylcellulose",
+        "ConcurrentVehicleControl": true,
+        "RecoveryGroupIncluded": true,
+        "RecoveryPeriodDays": 28,
+        "SatelliteGroupIncluded": true
+      },
+
+      "Toxicokinetics": {
+        "@type": "Toxicokinetics",
+        "TKCollected": true,
+        "TKSampleType": "Plasma (satellite animals)",
+        "AUC": "[reported per dose group]",
+        "Cmax": "[reported per dose group]",
+        "Tmax": "[reported per dose group]",
+        "HalfLife": "[reported]",
+        "Bioavailability": "[not determined — oral only]",
+        "AccumulationRatio": "[calculated Day 90 / Day 1 AUC]",
+        "DoseProportionality": "[assessed across dose range]",
+        "NonlinearTKFlag": false
+      },
+
+      "ClinicalPathology": {
+        "@type": "ClinicalPathology",
+        "HematologyPanel": ["RBC", "Hgb", "Hct", "MCV", "MCH", "MCHC", "WBC", "differential", "platelets", "reticulocytes"],
+        "ClinicalChemistryPanel": ["ALT", "AST", "ALP", "GGT", "total bilirubin", "total protein", "albumin", "globulin", "glucose", "BUN", "creatinine", "cholesterol", "triglycerides", "electrolytes"],
+        "UrinalysisPanel": ["volume", "specific gravity", "pH", "protein", "glucose", "ketones", "microscopy"],
+        "CoagulationPanel": ["PT", "APTT"],
+        "AnalyticalMethod": "[analyzer model and method as reported]",
+        "HistoricalControlDataAvailable": true
+      },
+
+      "OrganWeights": {
+        "@type": "OrganWeights",
+        "OrgansWeighed": ["brain", "heart", "liver", "kidneys", "spleen", "lungs", "adrenals", "testes/ovaries", "thyroid", "thymus"],
+        "AbsoluteWeight": true,
+        "RelativeToBodyWeight": true,
+        "RelativeToBrainWeight": false
+      },
+
+      "Histopathology": {
+        "@type": "Histopathology",
+        "OrgansExamined": "[full panel per OECD 408]",
+        "INHANDNomenclatureUsed": true,
+        "INHANDReference": "Thoolen et al. Toxicol Pathol. 2010;38(7 Suppl):5S-81S.",
+        "GradingSystem": "Minimal/Mild/Moderate/Marked/Severe (Grade 1–5)",
+        "PathologistQualification": "Board-certified toxicologic pathologist",
+        "PathologyPeerReview": true
+      },
+
+      "Interpretation": {
+        "@type": "Interpretation",
+        "NOAELMgKgDay": "[to be determined from data]",
+        "LOAELMgKgDay": "[to be determined from data]",
+        "AdversityJudgment": "[per finding]",
+        "AdversityCriteria": "Frank et al. (STP position paper)",
+        "AdversityCriteriaReference": "[PMID to be confirmed via LitScout]",
+        "AdaptiveVsAdverseClassification": "[per organ and finding]",
+        "ReversibilityAssessment": "Assessed in recovery cohort at Day 118",
+        "MechanisticHypothesis": "[if proposed by study authors — marked as MECHANISM]",
+        "MechanisticEvidenceQuality": "[association / functional evidence / mechanistic study]"
+      },
+
+      "Statistics": {
+        "@type": "Statistics",
+        "StatisticalMethods": "ANOVA with Dunnett post-hoc; Kruskal-Wallis with Dunn for non-parametric data",
+        "StatisticalSoftware": "[as reported]",
+        "SignificanceThreshold": "p < 0.05"
+      },
+
+      "Provenance": {
+        "@type": "prov:Activity",
+        "StudyStartDate": "[ISO 8601]",
+        "StudyEndDate": "[ISO 8601]",
+        "BatchID": "LOT-2024-001",
+        "DataVersion": "v1.0",
+        "QAStatus": "GLP-audited",
+        "AnalysisDate": "[ISO 8601]",
+        "ResponsibleAnalyst": "[name or ID]"
+      },
+
+      "MissingMetadata": {
+        "@type": "MissingMetadata",
+        "MissingElement": "[placeholder — to be populated by Bias Auditor]",
+        "MissingElementPriority": "[CRITICAL / HIGH / MEDIUM / LOW]",
+        "InterpretiveConsequence": "[statement of how the missing element limits interpretation]"
+      },
+
+      "EpistemicTag": "[OBSERVATION]",
+
+      "EvidenceSource": {
+        "@type": "EvidenceSource",
+        "PMID": "[to be assigned]",
+        "DOI": "[to be assigned]"
+      }
+    }
+  ],
+
+  "_tocsas_extension_notes": {
+    "schema_version": "1.0",
+    "created_by": "TOCSAS Metadata Architect",
+    "purpose": "Extends MMS core schema (mms_schema_v1.jsonld) with toxicology-specific metadata fields required for preclinical toxicology study interpretation, cross-study comparison, and knowledge graph construction.",
+    "mnms_coverage_gaps_addressed": [
+      "Dose levels and units",
+      "Route of administration",
+      "Vehicle and formulation composition",
+      "Dosing schedule and frequency",
+      "Study type classification",
+      "Regulatory guideline compliance",
+      "NOAEL and LOAEL",
+      "Clinical pathology panel",
+      "Organ weights",
+      "Histopathology findings with INHAND nomenclature",
+      "Toxicokinetic parameters",
+      "Adversity criteria and reference",
+      "Recovery and reversibility assessment",
+      "Missing metadata tracking with interpretive consequence",
+      "Epistemic tagging per claim"
+    ],
+    "ontology_alignments": {
+      "chemicals": "ChEBI (chebi:)",
+      "anatomy": "UBERON (uberon:)",
+      "pathology": "NCIThesaurus (ncit:)",
+      "experimental_factors": "EFO (efo:)",
+      "provenance": "PROV-O (prov:)"
+    }
+  }
+}

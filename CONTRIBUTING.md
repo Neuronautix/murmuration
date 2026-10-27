@@ -1,4 +1,4 @@
-# Contributing to Research Swarm
+# Contributing to Murmuration
 
 Thank you for your interest in contributing. Contributions from researchers, data scientists, and software engineers are all welcome.
 

@@ -30,7 +30,7 @@ Paste error output here
 - Python version: <!-- run `python --version` -->
 - AI provider: <!-- OpenAI / Anthropic / Google -->
 - Model: <!-- e.g., gpt-4o / claude-opus-4-6 -->
-- Package version: <!-- run `pip show research-swarm` or check pyproject.toml -->
+- Package version: <!-- run `pip show murmuration` or check pyproject.toml -->
 
 ## swarm_config.yml (relevant parts)
 

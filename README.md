@@ -1,8 +1,10 @@
-# Research Swarm
+# Murmuration
 
-> Repository: [Neuronautix/research-swarm](https://github.com/Neuronautix/research-swarm). Formerly published as **METODAX** (`dhuzard/metodax`); old GitHub URLs redirect here.
+> *A murmuration is a flock of starlings that moves as one, with no leader, each bird following a few simple rules. Here, the birds are research agents and the rules live in `swarm_config.yml`.*
 
-**Research Swarm automatically conducts literature reviews and writes research documents.**
+> Repository: [Neuronautix/murmuration](https://github.com/Neuronautix/murmuration). Formerly published as **METODAX** (`dhuzard/metodax`) and **Research Swarm**; old GitHub URLs redirect here.
+
+**Murmuration automatically conducts literature reviews and writes research documents.**
 
 Give it a research question. It deploys a team of AI agents that search PubMed, read papers, debate findings across specialisms, and write a structured document with full citations — no programming required.
 
@@ -20,7 +22,7 @@ Give it a research question. It deploys a team of AI agents that search PubMed, 
 
 ## How It Works
 
-Research Swarm coordinates a team of specialist AI agents through a supervised graph. Each agent has a focused role, a private knowledge base, and access to a curated set of research tools. An orchestrator routes sub-questions to the right specialists, a Reviewer-2 checkpoint validates outputs against configurable quality standards, and a Journalist agent writes the final structured document.
+Murmuration coordinates a team of specialist AI agents through a supervised graph. Each agent has a focused role, a private knowledge base, and access to a curated set of research tools. An orchestrator routes sub-questions to the right specialists, a Reviewer-2 checkpoint validates outputs against configurable quality standards, and a Journalist agent writes the final structured document.
 
 The entire team is configured through a single YAML file — `swarm_config.yml`. You never need to modify Python code to deploy a new research domain.
 
@@ -50,8 +52,8 @@ The entire team is configured through a single YAML file — `swarm_config.yml`.
 Requirements: Python 3.10+, `python3-venv`, `make`
 
 ```bash
-git clone https://github.com/Neuronautix/research-swarm.git
-cd research-swarm
+git clone https://github.com/Neuronautix/murmuration.git
+cd murmuration
 make setup
 ```
 
@@ -64,8 +66,8 @@ sudo apt update && sudo apt install -y python3 python3-venv make
 ### Native Windows (PowerShell)
 
 ```powershell
-git clone https://github.com/Neuronautix/research-swarm.git
-cd research-swarm
+git clone https://github.com/Neuronautix/murmuration.git
+cd murmuration
 py -3 -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
 .\.venv\Scripts\python -m pip install -e ".[dev]"
@@ -208,7 +210,7 @@ hitl:
 ## Repository Layout
 
 ```
-research-swarm/
+murmuration/
 ├── swarm_config.yml          # Active swarm definition — edit this to customize
 ├── agents/                   # Personas and local knowledge bases
 │   ├── Orchestrator/
@@ -227,7 +229,9 @@ research-swarm/
 │   ├── main.py               # CLI entry point (Typer)
 │   └── builder/              # Interactive swarm builder
 ├── examples/                 # Reference implementations for specific domains
-│   └── piu_psychiatry/       # Psychiatric research on problematic internet use
+│   ├── piu_psychiatry/       # Psychiatric research on problematic internet use
+│   ├── toxicology/           # TOCSAS preclinical toxicology metadata squad
+│   └── fair_nams/            # FAIR data, 3Rs and NAMs regulatory squad
 ├── Drafts/                   # Swarm outputs and generated documents
 ├── Knowledge_Traceability_Matrix.md  # Running evidence audit trail (auto-generated)
 ├── pyproject.toml
@@ -243,6 +247,8 @@ research-swarm/
 See the `examples/` folder for complete, ready-to-use swarm configurations:
 
 - **`examples/piu_psychiatry/`** — A complete six-specialist psychiatric research team for problematic internet use (PIU), with pre-populated knowledge bases, curated prompt sets, and domain-specific reviewer constraints. See its [README](examples/piu_psychiatry/README.md).
+- **`examples/toxicology/`** — TOCSAS, a nine-persona preclinical toxicology team for MNMS metadata mapping, conservative adversity interpretation and knowledge-graph design, with a draft toxicology extension schema. See its [README](examples/toxicology/README.md).
+- **`examples/fair_nams/`** — FAIR-NAMs-Squad, a five-persona team for 3Rs/NAMs regulatory context, FAIR semantics and implementation architecture. KB documents are listed as sources, not shipped. See its [README](examples/fair_nams/README.md).
 - `examples/climate_science/` — *(configuration stub — full agents/ and README coming soon)*
 - `examples/financial_modeling/` — *(configuration stub — full agents/ and README coming soon)*
 - `examples/legal_tech/` — *(configuration stub — full agents/ and README coming soon)*

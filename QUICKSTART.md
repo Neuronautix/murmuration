@@ -1,4 +1,4 @@
-# Quickstart: Run Research Swarm
+# Quickstart: Run Murmuration
 
 This guide takes you from zero to your first AI-generated research document.
 

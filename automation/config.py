@@ -1,5 +1,5 @@
 """
-config.py — Configuration Engine for the Research Swarm
+config.py — Configuration Engine for Murmuration
 
 Loads swarm_config.yml and dynamically builds:
   - System prompts (from persona files)
@@ -11,8 +11,8 @@ A user should NEVER need to edit this file. All customization flows
 through swarm_config.yml and agents/*/persona.md files.
 """
 
-import os
 import importlib
+import os
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +48,30 @@ def load_config(config_path: Path = CONFIG_PATH) -> dict:
         )
 
     return config
+
+
+SWARM_PATH_DEFAULTS = {
+    "output_dir": "./Drafts",
+    "traceability_matrix": "./Knowledge_Traceability_Matrix.md",
+}
+
+
+def resolve_swarm_path(config: dict | None, key: str) -> Path:
+    """Resolve a ``swarm.output_dir`` / ``swarm.traceability_matrix`` setting.
+
+    Relative paths are resolved against the project root so the CLI and the
+    agent tools agree on the same location regardless of the working directory.
+    Pass ``config=None`` to load ``swarm_config.yml``; if it cannot be loaded,
+    the documented default is used.
+    """
+    if config is None:
+        try:
+            config = load_config()
+        except (FileNotFoundError, ValueError, yaml.YAMLError):
+            config = {}
+    raw = (config.get("swarm") or {}).get(key) or SWARM_PATH_DEFAULTS[key]
+    path = Path(raw).expanduser()
+    return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
 
 
 def load_persona_content(persona_file: str) -> str:
