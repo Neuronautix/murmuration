@@ -3,7 +3,7 @@
 # ═══════════════════════════════════════════════════════════════
 # Ported from dhuzard/FAIR-NAMs-Squad-fns- at commit
 # 940a574a8b1c6a6d197cc6425c0ee91f958d62e9
-# (swarm_config.yml), adapted to the current research-swarm
+# (swarm_config.yml), adapted to the current Murmuration
 # schema: an explicit orchestrator block and HITL block were added, and
 # the unused system_prompt_template was dropped (the runtime builds
 # per-agent prompts from persona.md files).

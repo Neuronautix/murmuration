@@ -1,0 +1,311 @@
+# ═══════════════════════════════════════════════════════════════
+# swarm_config_hcmsas.yml — HCMSAS Team Configuration
+# Home Cage Monitoring Scientific Agent Squad
+# ═══════════════════════════════════════════════════════════════
+# Domain: Preclinical home cage monitoring (HCM) in rodents.
+# Focus:  Minimal metadata harmonization, MNMS compliance,
+#         reproducibility, behavioral interpretation limits,
+#         and knowledge graph construction.
+# ═══════════════════════════════════════════════════════════════
+
+# ── Swarm Identity ───────────────────────────────────
+swarm:
+  name: "HCMSAS"
+  description: >
+    Home Cage Monitoring Scientific Agent Squad.
+    Investigates, debates, and documents scientific questions in preclinical
+    home cage monitoring research, with emphasis on minimal metadata
+    harmonization (MNMS), reproducibility, and conservative interpretation
+    of automated behavioral outputs.
+  output_dir: "./Drafts/HCMSAS"
+  traceability_matrix: "./Knowledge_Traceability_Matrix_HCMSAS.md"
+
+# ── Orchestrator Settings ────────────────────────────
+orchestrator:
+  agent: "Dr. Nexus (HCMSAS)"
+  journalist: "HCMSAS Journalist"
+  max_agent_calls: 12
+  max_tool_rounds_per_agent: 6
+
+# ── LLM Backend ─────────────────────────────────────
+model:
+  provider: "openai"
+  name: "gpt-4o"
+  temperature: 0.2
+  env_key: "OPENAI_API_KEY"
+
+# ── Personas ─────────────────────────────────────────
+personas:
+  - name: "Dr. Nexus (HCMSAS)"
+    icon: "👑"
+    role: "Orchestrator & Synthesizer — HCM domain"
+    persona_file: "./examples/hcm/agents/HCMSAS_DrNexus/persona.md"
+    tools:
+      - search_web
+      - search_literature
+      - search_kb
+      - append_traceability
+
+  - name: "LitScout (HCMSAS)"
+    icon: "📚"
+    role: "HCM literature cartographer — citation chaining, platform papers, standards documents"
+    persona_file: "./examples/hcm/agents/HCMSAS_LitScout/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - trace_literature_network
+      - lookup_doi
+      - scrape_page
+
+  - name: "HCM Methodology Lead"
+    icon: "🔬"
+    role: "Hardware, sensor, classifier pipeline, and cross-platform comparability specialist"
+    persona_file: "./examples/hcm/agents/HCM_MethodLead/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - lookup_doi
+
+  - name: "Behavioral Interpretation Lead"
+    icon: "🐭"
+    role: "Operational behavioral definitions, ethological validity, and translational limits"
+    persona_file: "./examples/hcm/agents/HCM_BehaviorLead/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - lookup_doi
+
+  - name: "Metadata Architect"
+    icon: "🗂️"
+    role: "MNMS extraction, normalization, and metadata structure mapping"
+    persona_file: "./examples/hcm/agents/HCM_MetadataArchitect/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - lookup_doi
+      - append_traceability
+
+  - name: "Knowledge Graph Engineer"
+    icon: "🕸️"
+    role: "Graph schema design, entity/relation extraction, and provenance structuring"
+    persona_file: "./examples/hcm/agents/HCM_KGEngineer/persona.md"
+    tools:
+      - search_literature
+      - search_kb
+      - append_traceability
+      - check_schema_org
+
+  - name: "Reproducibility and Bias Auditor"
+    icon: "🔍"
+    role: "Confounders, metadata gaps, algorithmic validity, and cross-study comparability limits"
+    persona_file: "./examples/hcm/agents/HCM_ReproAuditor/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - lookup_doi
+      - append_traceability
+
+  - name: "HCMSAS Journalist"
+    icon: "✍️"
+    role: "Scientific writer — structured, citation-rich, epistemically cautious outputs"
+    persona_file: "./examples/hcm/agents/HCMSAS_Journalist/persona.md"
+    tools:
+      - write_section
+      - append_traceability
+      - git_snapshot
+
+# ── Tools Registry ───────────────────────────────────
+# Inherits all tool definitions from the base infrastructure.
+# See swarm_config.yml tools section — tool modules are shared.
+tools:
+  search_literature:
+    module: "automation.tools"
+    function: "search_pubmed"
+    description: "Search PubMed for peer-reviewed biomedical and preclinical literature"
+
+  search_web:
+    module: "automation.tools"
+    function: "search_you_engine"
+    description: "Search the live web via You.com API"
+
+  check_schema_org:
+    module: "automation.tools"
+    function: "check_schema_org"
+    description: "Validate terms against the Schema.org vocabulary"
+
+  write_section:
+    module: "automation.tools"
+    function: "write_manuscript_section"
+    description: "Write a drafted section to disk as Markdown"
+
+  append_traceability:
+    module: "automation.tools"
+    function: "append_traceability_matrix"
+    description: "Log a fact and its source to the HCMSAS Knowledge Traceability Matrix"
+
+  search_kb:
+    module: "automation.tools"
+    function: "search_knowledge_base"
+    description: "Search the local vectorized Knowledge Base documents"
+
+  scrape_page:
+    module: "automation.tools"
+    function: "scrape_webpage"
+    description: "Fetch and extract full text content from a URL"
+
+  search_preprints:
+    module: "automation.tools"
+    function: "search_semantic_scholar"
+    description: "Search Semantic Scholar for preprints and recent HCM publications"
+
+  trace_literature_network:
+    module: "automation.tools"
+    function: "trace_literature_network"
+    description: "Expand a major paper through its references and lead authors"
+
+  you_research:
+    module: "automation.tools"
+    function: "you_research"
+    description: "You.com Research API: multi-step web synthesis with inline citations"
+
+  lookup_doi:
+    module: "automation.tools"
+    function: "lookup_doi"
+    description: "Look up full citation metadata via Europe PMC and Crossref"
+
+  git_snapshot:
+    module: "automation.tools"
+    function: "git_commit_snapshot"
+    description: "Commit HCMSAS output files (Drafts/HCMSAS/ and traceability matrix) to git"
+
+# ── Reviewer-2 (Adversarial Checkpoint) ──────────────
+reviewer:
+  enabled: true
+  max_revision_loops: 3
+
+  banned_words:
+    - "groundbreaking"
+    - "revolutionary"
+    - "game-changing"
+    - "paradigm-shifting"
+    - "unprecedented"
+    - "clearly demonstrates"
+    - "proves"
+
+  required_elements:
+    - "a section distinguishing the four interpretation layers: raw measurement, derived feature, classifier output, and biological interpretation"
+    - "a short limitations section"
+    - "in-text citations (e.g., [1], [2])"
+    - "a formal 'References' section at the bottom"
+    - "when sleep or rest is discussed, an explicit statement of whether the measure is EEG-confirmed sleep or an immobility-based proxy"
+    - "a MNMS mapping table classifying each metadata field as: MNMS_core, recommended_non-core, extension_candidate, ambiguous, or missing_in_source"
+    - "a missing metadata report that lists absent MNMS_core fields as a scientific finding"
+    - "when a behavioral metric is mapped to a translational or psychiatric construct, explicit citation of the studies that justify the analogy"
+    - "a knowledge graph schema section with entity types, relation types, and provenance fields"
+    - "a reproducibility and comparability risk section with severity classification"
+
+  rejection_patterns:
+    - "any claim that an automated behavioral label constitutes direct evidence of a biological mechanism without the required evidence chain"
+    - "any cross-platform comparison that does not explicitly address sensor modality, temporal resolution, and classifier equivalence"
+    - "any prevalence or frequency figure without the platform, time window, and animal housing conditions under which it was measured"
+
+  tone: "strictly scientific, neutral, methodologically cautious, and epistemically explicit"
+
+  model:
+    name: "gpt-4o"
+    temperature: 0.8
+
+# ── Human-in-the-Loop (HITL) Checkpoints ─────────────
+hitl:
+  enabled: true
+  checkpoints:
+    - pre_flight      # Confirm: species, strain, sex, age, platform, behavior domain
+    - post_plan       # Approve orchestrator's literature and metadata routing plan
+    - pre_journalist  # Add final framing before writing; confirm MNMS classification
+    - on_rejection    # Reviewer rejected: choose REVISE / OVERRIDE / custom instructions
+
+# ── Epistemic Tags ───────────────────────────────────
+epistemic_tags:
+  - "[FACT]"
+  - "[INFERENCE]"
+  - "[SPECULATION]"
+  - "[MISSING]"
+  - "[MISSING SOURCE]"
+  - "[PLATFORM-SPECIFIC]"
+  - "[CONTESTED]"
+
+# ── Mandatory Output Structure ────────────────────────
+# The Journalist must produce all sections below.
+# Sections not yet supported by evidence must be explicitly marked [PENDING].
+output_sections:
+  - "A. Research scope"
+  - "B. Key evidence summary"
+  - "C. Evidence table with in-text citations"
+  - "D. HCM MNMS mapping table"
+  - "E. Missing metadata and ambiguity report"
+  - "F. Knowledge graph schema proposal"
+  - "G. Reproducibility and comparability risks"
+  - "H. Conservative conclusions"
+  - "I. References"
+
+# ── MNMS Metadata Categories ─────────────────────────
+# Reference taxonomy for the Metadata Architect.
+# These categories structure the metadata extraction workflow.
+mnms_categories:
+  - study_design
+  - animal_characteristics
+  - housing_and_cage_context
+  - husbandry_events
+  - environmental_conditions
+  - intervention_or_exposure
+  - acquisition_system
+  - software_and_classifier
+  - temporal_structure
+  - behavioral_endpoints
+  - preprocessing_and_QC
+  - provenance_and_versioning
+
+# ── Knowledge Graph Entity Types ─────────────────────
+# Reference vocabulary for the Knowledge Graph Engineer.
+kg_entity_types:
+  - Study
+  - Cohort
+  - Animal
+  - Cage
+  - HCM_System
+  - Sensor
+  - Software_Classifier
+  - Behavior
+  - Endpoint
+  - Intervention
+  - Environmental_Factor
+  - Husbandry_Event
+  - Time_Window
+  - Evidence_Source
+
+# ── Knowledge Graph Relation Types ───────────────────
+kg_relation_types:
+  - uses_system
+  - housed_in
+  - measured_by
+  - classified_by
+  - observed_during
+  - affected_by
+  - associated_with
+  - confounded_by
+  - supported_by_source
+  - is_proxy_for
+  - defined_as
+

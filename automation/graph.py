@@ -231,7 +231,8 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
     nexus_cfg = get_persona_config(config, config["orchestrator"]["agent"])
     system_prompt = build_agent_system_prompt(nexus_cfg)
     max_calls = config["orchestrator"].get("max_agent_calls", 8)
-    valid_targets = set(specialist_names) | {"Journalist", "END"}
+    journalist_name = config["orchestrator"]["journalist"]
+    valid_targets = set(specialist_names) | {journalist_name, "Journalist", "END"}
     specialist_set = set(specialist_names)
 
     hitl_on = hitl_cfg.get("enabled", False)
@@ -286,7 +287,8 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
         ])
         round_usage = _extract_token_usage(decision)
 
-        valid_next = [t for t in decision.next_agents if t in valid_targets]
+        valid_next = ["Journalist" if t == journalist_name else t
+                      for t in decision.next_agents if t in valid_targets]
         if not valid_next:
             valid_next = ["Journalist"]
 

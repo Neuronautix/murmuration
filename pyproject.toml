@@ -14,9 +14,9 @@ authors = [
 ]
 
 dependencies = [
-    "langchain>=0.3",
+    "langchain>=0.3,<1",
     "langchain-openai>=0.3",
-    "langchain-core>=0.3",
+    "langchain-core>=0.3,<1",
     "langchain-community>=0.3",
     "langchain-text-splitters>=0.3",
     "langgraph>=0.2",
@@ -35,8 +35,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/dhuzard/piu-psych-swarm"
-"Bug Tracker" = "https://github.com/dhuzard/piu-psych-swarm/issues"
+Homepage = "https://github.com/Neuronautix/murmuration"
+"Bug Tracker" = "https://github.com/Neuronautix/murmuration/issues"
+Repository = "https://github.com/Neuronautix/murmuration"
+Changelog = "https://github.com/Neuronautix/murmuration/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 anthropic = ["langchain-anthropic>=0.3"]

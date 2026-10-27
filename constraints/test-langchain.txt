@@ -1,0 +1,6 @@
+# Reproduced on Windows/Python 3.12 with langchain 1.2.14 and
+# langchain-core 0.3.84: tool.invoke raised AttributeError: langchain.debug.
+# This coherent 0.3 line passed the offline suite on 2026-10-23.
+langchain==0.3.27
+langchain-core==0.3.84
+langgraph==0.6.11
