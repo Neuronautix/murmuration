@@ -1,5 +1,5 @@
 """
-main.py — CLI Entry Point for the Research Swarm
+main.py — CLI Entry Point for Murmuration
 
 Usage:
     python -m automation.main init
@@ -70,6 +70,7 @@ from automation.builder.wizard import (
 from automation.config import (
     get_hitl_config,
     load_config,
+    resolve_swarm_path,
     validate_env,
 )
 from automation.graph import Command, build_graph  # Command re-exported from graph.py
@@ -81,7 +82,7 @@ console = Console()
 
 app = typer.Typer(
     name="swarm",
-    help="Research Swarm CLI — A configurable multi-agent research system built on LangGraph.",
+    help="Murmuration CLI — A configurable multi-agent research system built on LangGraph.",
     add_completion=False,
 )
 blueprint_app = typer.Typer(help="Export or import portable blueprint files for reuse across repos.")
@@ -196,9 +197,8 @@ MATRIX_HEADER = (
 def _ensure_matrix_header(config: dict, task: str) -> None:
     """Create the traceability matrix with its table header if it does not exist,
     then append a run-separator line so each run's entries are clearly delimited."""
-    matrix_path = Path(
-        config["swarm"].get("traceability_matrix", "./Knowledge_Traceability_Matrix.md")
-    )
+    matrix_path = resolve_swarm_path(config, "traceability_matrix")
+    matrix_path.parent.mkdir(parents=True, exist_ok=True)
     if not matrix_path.exists():
         matrix_path.write_text(MATRIX_HEADER, encoding="utf-8")
 
@@ -209,8 +209,8 @@ def _ensure_matrix_header(config: dict, task: str) -> None:
 
 
 def _write_run_metrics(config: dict, task: str, token_usage: dict) -> None:
-    """Write per-run token/cost metrics to Drafts/run_metrics.json."""
-    drafts_dir = Path(config["swarm"].get("output_dir", "./Drafts"))
+    """Write per-run token/cost metrics to <swarm.output_dir>/run_metrics.json."""
+    drafts_dir = resolve_swarm_path(config, "output_dir")
     drafts_dir.mkdir(parents=True, exist_ok=True)
 
     input_price_per_m = 2.50   # gpt-4o list pricing $/M tokens (2025)
@@ -404,7 +404,7 @@ def _run_graph(config: dict, prompt: str) -> None:
         raise typer.Exit(code=1)
 
     typer.secho("\n✅ Task complete.", fg=typer.colors.GREEN)
-    output_dir = config["swarm"].get("output_dir", "./Drafts")
+    output_dir = resolve_swarm_path(config, "output_dir")
     typer.secho(f"📂 Outputs saved to '{output_dir}/'", fg=typer.colors.CYAN)
 
     _write_run_metrics(config, prompt, final_token_usage)

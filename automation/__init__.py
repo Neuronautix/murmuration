@@ -1,1 +1,1 @@
-# automation — Research Swarm LangGraph Framework
+# automation — Murmuration LangGraph Framework

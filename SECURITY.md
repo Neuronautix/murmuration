@@ -9,7 +9,7 @@
 
 ## Scope
 
-Research Swarm is a local orchestration framework. It does not run a server,
+Murmuration is a local orchestration framework. It does not run a server,
 expose network ports, or store credentials. The primary security surface is:
 
 - **API keys** — loaded from `.env` via `python-dotenv`. Never committed.
