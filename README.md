@@ -225,7 +225,9 @@ research-swarm/
 │   ├── main.py               # CLI entry point (Typer)
 │   └── builder/              # Interactive swarm builder
 ├── examples/                 # Reference implementations for specific domains
-│   └── piu_psychiatry/       # Psychiatric research on problematic internet use
+│   ├── piu_psychiatry/       # Psychiatric research on problematic internet use
+│   ├── toxicology/           # TOCSAS preclinical toxicology metadata squad
+│   └── fair_nams/            # FAIR data, 3Rs and NAMs regulatory squad
 ├── Drafts/                   # Swarm outputs and generated documents
 ├── Knowledge_Traceability_Matrix.md  # Running evidence audit trail (auto-generated)
 ├── pyproject.toml
@@ -241,6 +243,8 @@ research-swarm/
 See the `examples/` folder for complete, ready-to-use swarm configurations:
 
 - **`examples/piu_psychiatry/`** — A complete six-specialist psychiatric research team for problematic internet use (PIU), with pre-populated knowledge bases, curated prompt sets, and domain-specific reviewer constraints. See its [README](examples/piu_psychiatry/README.md).
+- **`examples/toxicology/`** — TOCSAS, a nine-persona preclinical toxicology team for MNMS metadata mapping, conservative adversity interpretation and knowledge-graph design, with a draft toxicology extension schema. See its [README](examples/toxicology/README.md).
+- **`examples/fair_nams/`** — FAIR-NAMs-Squad, a five-persona team for 3Rs/NAMs regulatory context, FAIR semantics and implementation architecture. KB documents are listed as sources, not shipped. See its [README](examples/fair_nams/README.md).
 - `examples/climate_science/` — *(configuration stub — full agents/ and README coming soon)*
 - `examples/financial_modeling/` — *(configuration stub — full agents/ and README coming soon)*
 - `examples/legal_tech/` — *(configuration stub — full agents/ and README coming soon)*

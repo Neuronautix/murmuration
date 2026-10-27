@@ -5,10 +5,7 @@ These tests verify that the graph can be constructed from a minimal valid
 config without any real LLM calls or API keys.
 """
 
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-
+from unittest.mock import MagicMock, patch
 
 MINIMAL_CONFIG = {
     "swarm": {

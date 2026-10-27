@@ -1,0 +1,157 @@
+# ═══════════════════════════════════════════════════════════════
+# examples/fair_nams/swarm_config.yml — FAIR-NAMs-Squad
+# ═══════════════════════════════════════════════════════════════
+# Ported from dhuzard/FAIR-NAMs-Squad-fns- at commit
+# 940a574a8b1c6a6d197cc6425c0ee91f958d62e9
+# (swarm_config.yml), adapted to the current research-swarm
+# schema: an explicit orchestrator block and HITL block were added, and
+# the unused system_prompt_template was dropped (the runtime builds
+# per-agent prompts from persona.md files).
+# Persona paths are relative to the repository root.
+# ═══════════════════════════════════════════════════════════════
+
+# ── Swarm Identity ───────────────────────────────────
+swarm:
+  name: "FAIR-NAMs-Squad"
+  description: "Autonomous Research Swarm for Regulatory Toxicology & New Approach Methodologies"
+  output_dir: "./Drafts/FAIR_NAMs"
+  traceability_matrix: "./Knowledge_Traceability_Matrix_FAIR_NAMs.md"
+
+# ── Orchestrator Settings ────────────────────────────
+orchestrator:
+  agent: "Dr. Nexus"
+  journalist: "Journalist"
+  max_agent_calls: 8
+  max_tool_rounds_per_agent: 5
+
+# ── LLM Backend ─────────────────────────────────────
+# Supported providers: openai, anthropic, google
+model:
+  provider: "openai"
+  name: "gpt-4o"
+  temperature: 0.2
+  env_key: "OPENAI_API_KEY"
+
+# ── Personas ─────────────────────────────────────────
+personas:
+  - name: "Dr. Nexus"
+    icon: "👑"
+    role: "Orchestrator & Synthesizer"
+    persona_file: "./examples/fair_nams/agents/DrNexus/persona.md"
+    tools:
+      - search_web
+      - search_literature
+      - search_kb
+      - append_traceability
+
+  - name: "BioEthos"
+    icon: "🐁"
+    role: "Ethics & Regulatory Officer"
+    persona_file: "./examples/fair_nams/agents/BioEthos/persona.md"
+    tools:
+      - search_literature
+      - search_web
+      - search_kb
+
+  - name: "Semantica"
+    icon: "🦉"
+    role: "Ontologist & FAIR Data Expert"
+    persona_file: "./examples/fair_nams/agents/Semantica/persona.md"
+    tools:
+      - check_schema_org
+      - search_web
+      - search_kb
+
+  - name: "TechLead"
+    icon: "⚙️"
+    role: "Architect & Implementation Lead"
+    persona_file: "./examples/fair_nams/agents/TechLead/persona.md"
+    tools:
+      - search_web
+      - search_kb
+
+  - name: "Journalist"
+    icon: "✍️"
+    role: "Observer & Scribe"
+    persona_file: "./examples/fair_nams/agents/Journalist/persona.md"
+    tools:
+      - write_section
+      - append_traceability
+      - git_snapshot
+
+# ── Tools Registry ───────────────────────────────────
+tools:
+  search_literature:
+    module: "automation.tools"
+    function: "search_pubmed"
+    description: "Search PubMed for peer-reviewed biomedical literature"
+
+  search_web:
+    module: "automation.tools"
+    function: "search_you_engine"
+    description: "Search the live web via You.com API"
+
+  check_schema_org:
+    module: "automation.tools"
+    function: "check_schema_org"
+    description: "Validate terms against the Schema.org vocabulary"
+
+  write_section:
+    module: "automation.tools"
+    function: "write_manuscript_section"
+    description: "Write a drafted section to disk as Markdown"
+
+  append_traceability:
+    module: "automation.tools"
+    function: "append_traceability_matrix"
+    description: "Log a fact and its source to the Knowledge Traceability Matrix"
+
+  search_kb:
+    module: "automation.tools"
+    function: "search_knowledge_base"
+    description: "Search the local vectorized Knowledge Base documents"
+
+  scrape_page:
+    module: "automation.tools"
+    function: "scrape_webpage"
+    description: "Fetch and extract full text content from a URL"
+
+  git_snapshot:
+    module: "automation.tools"
+    function: "git_commit_snapshot"
+    description: "Commit swarm output files (Drafts/ and traceability matrix) to git"
+
+# ── Reviewer-2 (Adversarial Checkpoint) ──────────────
+# Rules carried over unchanged from the donor. The donor defined no
+# rejection_patterns, so `doctor` warns that adversarial checks may be weak.
+reviewer:
+  enabled: true
+  max_revision_loops: 3
+
+  banned_words:
+    - "groundbreaking"
+    - "revolutionary"
+    - "game-changing"
+    - "paradigm-shifting"
+    - "unprecedented"
+
+  required_elements:
+    - "in-text citations (e.g., [1], [2])"
+    - "a formal 'References' or 'Reference List' section at the bottom"
+
+  tone: "strictly factual, objective, and neutral"
+
+# ── Human-in-the-Loop (HITL) Checkpoints ─────────────
+hitl:
+  enabled: false
+  checkpoints:
+    - pre_flight
+    - post_plan
+    - pre_journalist
+    - on_rejection
+
+# ── Epistemic Tags ───────────────────────────────────
+epistemic_tags:
+  - "[FACT]"
+  - "[INFERENCE]"
+  - "[SPECULATION]"
