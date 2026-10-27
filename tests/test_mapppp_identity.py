@@ -1,0 +1,80 @@
+import json
+from datetime import datetime, timezone
+
+import pytest
+
+from automation.exporters.mapppp import export_hcm_mapppp_bundle
+from tests.test_mapppp_export import _write_hcm_fixture_files
+
+
+def test_repeated_export_uses_persistent_sources_and_identical_payload(tmp_path):
+    config, matrix, draft, notes = _write_hcm_fixture_files(tmp_path)
+    kwargs = dict(config_path=config, draft_path=draft, traceability_matrix_path=matrix,
+                  review_notes_path=notes)
+    first = export_hcm_mapppp_bundle(**kwargs, exported_at=datetime(2026, 4, 10, tzinfo=timezone.utc))
+    second = export_hcm_mapppp_bundle(**kwargs, exported_at=datetime(2026, 4, 11, tzinfo=timezone.utc))
+    assert first.model_dump(mode="json") == second.model_dump(mode="json")
+    assert first.package_metadata.package_id.startswith("hcmsas-mapppp-sha256-")
+    registry = json.loads((draft.parent / "source_registry.json").read_text(encoding="utf-8"))
+    ids = set(registry["sources"])
+    assert ids
+    assert all(not source_id.startswith("[") for source_id in ids)
+    assert all(item.provenance.source_id in ids for family in (
+        first.metadata_assertions, first.evidence_assertions, first.mapping_assertions,
+        first.graph_assertions, first.review_notes) for item in family)
+
+
+def test_distinct_exports_in_same_second_get_distinct_ids(tmp_path):
+    config, matrix, draft, notes = _write_hcm_fixture_files(tmp_path)
+    kwargs = dict(config_path=config, draft_path=draft, traceability_matrix_path=matrix,
+                  review_notes_path=notes, exported_at=datetime(2026, 4, 10, tzinfo=timezone.utc))
+    first = export_hcm_mapppp_bundle(**kwargs)
+    draft.write_text(draft.read_text(encoding="utf-8").replace(
+        "Light cycle transition timing was not reported", "Light cycle and temperature were not reported"),
+        encoding="utf-8")
+    second = export_hcm_mapppp_bundle(**kwargs)
+    assert first.package_metadata.package_id != second.package_metadata.package_id
+
+
+def test_unresolved_citation_fails_closed(tmp_path):
+    config, matrix, draft, notes = _write_hcm_fixture_files(tmp_path)
+    draft.write_text(draft.read_text(encoding="utf-8").replace(
+        "Light cycle transition timing was not reported [1]",
+        "Light cycle transition timing was not reported [99]"), encoding="utf-8")
+    with pytest.raises(ValueError, match="Unresolved citation reference"):
+        export_hcm_mapppp_bundle(config, draft, matrix, notes)
+
+
+def test_retry_after_revision_keeps_package_id(tmp_path):
+    """Exporting A, then revision B, then A again must reproduce A's bundle exactly."""
+    config, matrix, draft, notes = _write_hcm_fixture_files(tmp_path)
+    kwargs = dict(config_path=config, draft_path=draft, traceability_matrix_path=matrix,
+                  review_notes_path=notes)
+    original = draft.read_text(encoding="utf-8")
+    first = export_hcm_mapppp_bundle(**kwargs, exported_at=datetime(2026, 4, 10, tzinfo=timezone.utc))
+    draft.write_text(original.replace(
+        "Light cycle transition timing was not reported", "Light cycle and temperature were not reported"),
+        encoding="utf-8")
+    export_hcm_mapppp_bundle(**kwargs, exported_at=datetime(2026, 4, 11, tzinfo=timezone.utc))
+    draft.write_text(original, encoding="utf-8")
+    retry = export_hcm_mapppp_bundle(**kwargs, exported_at=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    assert retry.model_dump(mode="json") == first.model_dump(mode="json")
+    registry = json.loads((draft.parent / "source_registry.json").read_text(encoding="utf-8"))
+    assert len(registry["sources"]) > len(retry.sources)
+
+
+def test_superseded_row_does_not_bind_citations(tmp_path):
+    """A superseded row citing [1] with an old source must not block or steer the export."""
+    config, matrix, draft, notes = _write_hcm_fixture_files(tmp_path)
+    active = ("| HCM-001 | Continuous cage-side HCM can capture circadian locomotor activity in mice [1] "
+              "| [FACT] | DOI:10.1000/hcm.methods.2024 |")
+    text = matrix.read_text(encoding="utf-8")
+    assert active in text
+    stale = ("| HCM-001a | Continuous cage-side HCM can capture circadian locomotor activity in mice [1] "
+             "| [FACT] | DOI:10.1000/hcm.methods.2023 | Metadata Architect | temporal_structure "
+             "| Wrong DOI, replaced by HCM-001. | superseded |\n")
+    matrix.write_text(text.replace(active, stale + active), encoding="utf-8")
+    bundle = export_hcm_mapppp_bundle(config, draft, matrix, notes)
+    source_ids = {source["source_id"] for source in bundle.sources}
+    assert "DOI:10.1000/hcm.methods.2024" in source_ids
+    assert "DOI:10.1000/hcm.methods.2023" not in source_ids

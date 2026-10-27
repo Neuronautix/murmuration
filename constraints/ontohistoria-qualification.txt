@@ -1,0 +1,2 @@
+# Current immutable-ingest commit on 2026-10-23; main was 199ef027.
+ontohistoria @ git+https://github.com/Neuronautix/OntoHistoCurator.git@c426705611df098256c15416ae07f084191c395e

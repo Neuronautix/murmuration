@@ -1,0 +1,26 @@
+[
+  {
+    "pmid": "1001",
+    "title": "Home cage monitoring in female mice",
+    "abstract": "Female C57BL/6J mice were group-housed. An infrared sensor tracked locomotor activity under a 12:12 light-dark cycle with classifier version 2.1.",
+    "expected_fields": ["species", "endpoint", "housing_context", "strain", "sex", "light_dark_schedule", "housing_specifics", "activity_metric_definition", "sensor_modality", "software_version"],
+    "expected_mapped_fields": ["species", "light_dark_schedule", "sensor_modality", "software_version"],
+    "expected_review_gaps": []
+  },
+  {
+    "pmid": "1002",
+    "title": "Digital Ventilated Cage monitoring of mice",
+    "abstract": "Group-housed mice showed circadian locomotor activity in the dark phase.",
+    "expected_fields": ["species", "endpoint", "temporal_structure", "housing_context", "monitoring_platform", "light_dark_schedule", "housing_specifics", "activity_metric_definition"],
+    "expected_mapped_fields": ["species"],
+    "expected_review_gaps": ["light_dark_schedule", "software_version"]
+  },
+  {
+    "pmid": "1003",
+    "title": "Mouse home cage report",
+    "abstract": "Mice showed locomotor activity.",
+    "expected_fields": ["species", "endpoint", "activity_metric_definition"],
+    "expected_mapped_fields": ["species"],
+    "expected_review_gaps": ["light_dark_schedule", "software_version"]
+  }
+]

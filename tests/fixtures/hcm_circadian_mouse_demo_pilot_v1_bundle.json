@@ -1,0 +1,855 @@
+{
+  "package_metadata": {
+    "package_id": "hcm_circadian_mouse_demo-mapppp-20260410T140654Z",
+    "created_at": "2026-04-10T14:06:54+00:00",
+    "created_by": "automation.hcm_pilot.run_hcm_pilot",
+    "contract_name": "MAPPPP",
+    "contract_version": "0.1.0",
+    "domain_type": "hcm"
+  },
+  "study_context": {
+    "species": "mouse"
+  },
+  "metadata_assertions": [
+    {
+      "assertion_id": "metadata-39880968-species",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "species",
+      "value": "mouse"
+    },
+    {
+      "assertion_id": "metadata-39880968-temporal",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "temporal_structure",
+      "value": "circadian"
+    },
+    {
+      "assertion_id": "metadata-39880968-platform",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "monitoring_platform",
+      "value": "digital_ventilated_cage"
+    },
+    {
+      "assertion_id": "metadata-39371613-species",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39371613",
+        "source_anchor": "title/abstract PMID 39371613",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "species",
+      "value": "mouse"
+    },
+    {
+      "assertion_id": "metadata-39371613-endpoint",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39371613",
+        "source_anchor": "title/abstract PMID 39371613",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "endpoint",
+      "value": "locomotor_activity"
+    },
+    {
+      "assertion_id": "metadata-39371613-temporal",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39371613",
+        "source_anchor": "title/abstract PMID 39371613",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "temporal_structure",
+      "value": "circadian"
+    },
+    {
+      "assertion_id": "metadata-39371613-housing",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39371613",
+        "source_anchor": "title/abstract PMID 39371613",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "housing_context",
+      "value": "group_housed"
+    },
+    {
+      "assertion_id": "metadata-39763604-species",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "species",
+      "value": "mouse"
+    },
+    {
+      "assertion_id": "metadata-39763604-endpoint",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "endpoint",
+      "value": "locomotor_activity"
+    },
+    {
+      "assertion_id": "metadata-39763604-temporal",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "temporal_structure",
+      "value": "circadian"
+    },
+    {
+      "assertion_id": "metadata-39763604-housing",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "housing_context",
+      "value": "group_housed"
+    },
+    {
+      "assertion_id": "metadata-39763604-platform",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "monitoring_platform",
+      "value": "digital_ventilated_cage"
+    },
+    {
+      "assertion_id": "metadata-39296476-species",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39296476",
+        "source_anchor": "title/abstract PMID 39296476",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "species",
+      "value": "mouse"
+    },
+    {
+      "assertion_id": "metadata-39296476-endpoint",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39296476",
+        "source_anchor": "title/abstract PMID 39296476",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "endpoint",
+      "value": "locomotor_activity"
+    },
+    {
+      "assertion_id": "metadata-39296476-temporal",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39296476",
+        "source_anchor": "title/abstract PMID 39296476",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "temporal_structure",
+      "value": "circadian"
+    },
+    {
+      "assertion_id": "metadata-39296476-platform",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39296476",
+        "source_anchor": "title/abstract PMID 39296476",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "monitoring_platform",
+      "value": "digital_ventilated_cage"
+    },
+    {
+      "assertion_id": "metadata-39534023-species",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39534023",
+        "source_anchor": "title/abstract PMID 39534023",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "species",
+      "value": "mouse"
+    },
+    {
+      "assertion_id": "metadata-corpus-light-cycle",
+      "status": "proposed",
+      "epistemic_label": "uncertain",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "light_cycle_parameters",
+      "value": "not consistently reported in abstract-level seed corpus"
+    },
+    {
+      "assertion_id": "metadata-corpus-classifier-version",
+      "status": "proposed",
+      "epistemic_label": "uncertain",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "field": "classifier_version",
+      "value": "not consistently reported in abstract-level seed corpus"
+    }
+  ],
+  "evidence_assertions": [
+    {
+      "assertion_id": "evidence-39880968",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39880968",
+      "observation": "Evaluation of the Digital Ventilated Cage® system for circadian phenotyping.",
+      "value": "The study of circadian rhythms has been critically dependent upon analysing mouse home cage activity, typically employing wheel running activity under different lighting conditions. Here we assess a novel method, the Digital Ventilated Cage (DVC®, Tecniplast SpA, Italy), for circadian phenotyping. Based upon capacitive sensors mounted under black individually ventilated cages with inbuilt LED lighting, each cage becomes an independent light-controlled chamber. Home cage activity in C57BL/6J mice was recorded under a range of lighting conditions, along with circadian clock-deficient cryptochrome-deficient mice (Cry1-/-, Cry2-/- double knockout). C57BL/6J mice exhibited a 24 h period under light/dark conditions, with a free-running period of 23.5 h under constant dark, and period lengthening under constant light. Animals displayed expected phase shifting responses to jet-lag and nocturnal light pulses. Sex differences in circadian parameters and phase shifting responses were also observed. Cryptochrome-deficient mice showed subtle changes in activity under light/dark conditions and were arrhythmic under constant dark, as expected. Our results show the suitability of the DVC system for circadian behavioural screens, accurately detecting circadian period, circadian disruption, phase shifts and mice with clock defects. We provide an evaluation of the strengths and limitations of this method, highlighting how the use of the DVC for studying circadian rhythms depends upon the research requirements of the end user."
+    },
+    {
+      "assertion_id": "evidence-39371613",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39371613",
+        "source_anchor": "title/abstract PMID 39371613",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39371613",
+      "observation": "Accurate locomotor activity profiles of group-housed mice derived from home cage monitoring data.",
+      "value": "INTRODUCTION: Holistic phenotyping of rodent models is increasing, with a growing awareness of the 3Rs and the fact that specialized experimental setups can also impose artificial restrictions. Activity is an important parameter for almost all basic and applied research areas involving laboratory animals. Locomotor activity, the main form of energy expenditure, influences metabolic rate, muscle mass, and body weight and is frequently investigated in metabolic disease research. Additionally, it serves as an indicator of animal welfare in therapeutic, pharmacological, and toxicological studies. Thus, accurate and effective measurement of activity is crucial. However, conventional monitoring systems often alter the housing environment and require handling, which can introduce artificial interference and lead to measurement inaccuracies. METHODS: Our study focused on evaluating circadian activity profiles derived from the DVC and comparing them with conventional activity measurements to validate them statistically and assess their reproducibility. We utilized data from metabolic studies, an Alzheimer's disease model known for increased activity, and included DVC monitoring in a project investigating treatment effects on activity in a type-1-like diabetes model. RESULTS: The DVC data yielded robust, scientifically accurate, and consistent circadian profiles from group-housed mice, which is particularly advantageous for longitudinal experiments. The activity profiles from both systems were fully comparable, providing matching profiles. Using DVC monitoring, we confirmed the hyperactivity phenotype in an AD model and reproduced a decline in activity in type-1-like diabetes model. DISCUSSION: In our work, we derived robust circadian activity profiles from the DVC data of group-housed mice, which were scientifically accurate, reproducible and comparable to another activity measurement. This approach can not only improve animal welfare according to the 3R principles but can also be implement in high-throughput longitudinal studies. Furthermore, we discuss the advantages and limitations of DVC activity measurements to highlight its potential and avoid confounders."
+    },
+    {
+      "assertion_id": "evidence-39763604",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39763604",
+      "observation": "Detection of aberrant locomotor activity in a mouse model of lung cancer via home cage monitoring.",
+      "value": "INTRODUCTION: Lung cancer is the first cause of cancer death in the world, due to a delayed diagnosis and the absence of efficacy therapies. KRAS mutation occurs in 25% of all lung cancers and the concomitant mutations in LKB1 determine aggressive subtypes of these tumors. The improvement of therapeutical options for KRASG12C mutations has increased the possibility of treating these tumors, but resistance to these therapies has emerged. Preclinical animal models permit the study of tumors and the development of new therapies. The DVC system was used to measure circadian activity changes indicative of lung cancer progression in KRAS and KRAS-LKB1 transgenic mouse models. MATERIAL AND METHODS: KRAS and KRAS-LKB1 conditional transgenic animal models were bred and genotyped. The tumors were inducted using adeno-CRE-recombinase system. The mice were housed in a Digital Ventilated Cage (DVC®) rack measuring the locomotor activity continuously for 24/7. The progression of the tumors was monitored with MRI. The DVC system evaluated a reduction in animal locomotion during the tumor progression. RESULTS: KRAS and KRAS-LKB1 mutations were induced, and the tumor formation and progression were monitored over time. As expected, the onset of the tumors in the two different breeds occurred at different times. DVC system registered the locomotion activity of the mice during the light and dark phases, reporting a strong reduction, mainly, in the dark phase. In KRAS-LKB1 models, the locomotion reduction appeared more pronounced than in KRAS models. DISCUSSIONS: Transgenic animal models represent a fundamental tool to study the biology of cancers and the development of new therapies. The tumors induced in these models harbor the same genotypical and phenotypical characteristics as their human counterparts. DVC methods permit a home cage monitoring system useful for tracking animal behavior continuously 24 hours a day, 7 days a week. DVC system could determine disease progression by monitoring a single animal activity in a cage and also using group-housed animals. For these reasons, the DVC system could play a crucial role in identifying diseases at early stages and in testing new therapeutic approaches with a higher likelihood of efficacy."
+    },
+    {
+      "assertion_id": "evidence-39296476",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39296476",
+        "source_anchor": "title/abstract PMID 39296476",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39296476",
+      "observation": "Continuous locomotor activity monitoring to assess animal welfare following intracranial surgery in mice.",
+      "value": "Locomotor activity can serve as a readout to identify discomfort and pain. Therefore, monitoring locomotor activity following interventions that induce potential discomfort may serve as a reliable method for evaluating animal health, complementing conventional methods such as body weight measurement. In this study, we used the digital ventilated cage (DVC®) system for the assessment of circadian locomotor activity, in addition to body weight monitoring, following intracranial stereotaxic surgery in an Alzheimer's disease mouse model (C57BL/6J/APPswe/PSEN1dE9). Stereotaxic surgery did not affect the organization of circadian locomotor activity of both 7-8-week-old and 19-21-week-old mice. However, we observed that both young and old mice exhibited a significant decrease in activity during the dark phase. Also, our study shows that changes in locomotor activity exhibit higher sensitivity in detecting alterations indicative of animal health compared to measuring body weight. In contrast to 7-8-week-old mice, where we observed no genotypic differences in locomotor activity, 19-21-week-old APP/PS1 mice showed increased locomotor activity compared to wild-type mice. Furthermore, our analyses revealed that a subset of the 7-8-week-old mice showed increased locomotor activity during the initial peak of the dark phase. One mouse experienced sudden death early in life, possibly due to epileptic seizures. Altogether, our findings affirm continuous activity measurements as used in the DVC® as a highly valuable objective method for post-surgical welfare monitoring. Its discerning capacity not only facilitates circadian locomotor rhythm assessment but also enables the identification of individual aberrant activity patterns, possibly indicative of epileptic seizures."
+    },
+    {
+      "assertion_id": "evidence-39534023",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39534023",
+        "source_anchor": "title/abstract PMID 39534023",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39534023",
+      "observation": "Automated home cage monitoring of an aging colony of mice-Implications for welfare monitoring and experimentation.",
+      "value": "INTRODUCTION: Our understanding of laboratory animal behavior and the implications of husbandry activities on their wellbeing remains incomplete. This is especially relevant with an aging colony as their activity patterns may change as they mature. Home Cage Monitoring (HCM) provides valuable insights into mouse activity within the animal's own environment and can shed light on acclimatization periods and responses to husbandry activities such as cage changing. The aim of this study was to monitor and explore changes in the activity and rest disturbance (RDI) patterns of an aging colony of male and female C57/BL6 mice. METHODS: The mice were housed in the Digitally Ventilated Cage® system, for up to 18 months of age. Data was then downloaded to investigate how the activity patterns and RDI of the mice changed over time. Habituation, aging and cage change assessments were conducted using linear mixed models, while cage separation and stereotypic behavior investigations were conducted by visual inspection of the data. RESULTS: As expected during the study, mice were less active during the light phase compared to the dark phase. However, on arrival mice displayed heightened activity and RDI during the light phase and reduced activity and RDI during the dark phase, taking several days to adjust to baseline \"acclimatized\" patterns. With age, overall activity significantly decreased from 5 months until 14 months of age, after which it increased back toward baseline levels. We also observed activity spikes during our monitoring of this colony. Prolonged housing can lead to alarming stereotypic behaviors in animals. Cages of mice flagged for potential stereotypy displayed sustained activity spikes in the light and dark phases. Spikes in activity during the dark phase were much more pronounced than in the light phase. Cage changing led to an increase in the light phase activity and RDI compared to the previous day, with no observed difference in the dark phase post-cage change. This effect remained consistent as the animals aged. DISCUSSION: This study explores changes in the activity patterns of an aging colony of male and female C57/BL6 mice housed in the Digitally Ventilated Cage® system. We identified distinct aging phases concerning activity and RDI differences and a potential new welfare application for the DVC®, specifically for early detection of stereotypy. In conclusion, the adoption of HCM systems should be considered for long-term animal housing from both a welfare and behavioral perspective."
+    }
+  ],
+  "mapping_assertions": [
+    {
+      "assertion_id": "mapping-metadata-39880968-species",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "species",
+      "target_schema": "MNMS",
+      "target_field": "animal_characteristics",
+      "mapping_rationale": "species is required to interpret reuse eligibility",
+      "confidence": 0.95
+    },
+    {
+      "assertion_id": "mapping-metadata-39880968-temporal",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "temporal_structure",
+      "target_schema": "MNMS",
+      "target_field": "temporal_structure",
+      "mapping_rationale": "circadian interpretation depends on temporal structure",
+      "confidence": 0.9
+    },
+    {
+      "assertion_id": "mapping-metadata-39880968-platform",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "monitoring_platform",
+      "target_schema": "MNMS",
+      "target_field": "acquisition_system",
+      "mapping_rationale": "platform and sensor stack affect comparability",
+      "confidence": 0.9
+    },
+    {
+      "assertion_id": "mapping-metadata-39371613-species",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39371613",
+        "source_anchor": "title/abstract PMID 39371613",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "species",
+      "target_schema": "MNMS",
+      "target_field": "animal_characteristics",
+      "mapping_rationale": "species is required to interpret reuse eligibility",
+      "confidence": 0.95
+    },
+    {
+      "assertion_id": "mapping-metadata-39371613-endpoint",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39371613",
+        "source_anchor": "title/abstract PMID 39371613",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "endpoint",
+      "target_schema": "MNMS",
+      "target_field": "behavioral_endpoints",
+      "mapping_rationale": "locomotor activity is the core endpoint under study",
+      "confidence": 0.9
+    },
+    {
+      "assertion_id": "mapping-metadata-39371613-temporal",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39371613",
+        "source_anchor": "title/abstract PMID 39371613",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "temporal_structure",
+      "target_schema": "MNMS",
+      "target_field": "temporal_structure",
+      "mapping_rationale": "circadian interpretation depends on temporal structure",
+      "confidence": 0.9
+    },
+    {
+      "assertion_id": "mapping-metadata-39371613-housing",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39371613",
+        "source_anchor": "title/abstract PMID 39371613",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "housing_context",
+      "target_schema": "MNMS",
+      "target_field": "housing_and_cage_context",
+      "mapping_rationale": "group housing changes locomotor interpretation",
+      "confidence": 0.85
+    },
+    {
+      "assertion_id": "mapping-metadata-39763604-species",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "species",
+      "target_schema": "MNMS",
+      "target_field": "animal_characteristics",
+      "mapping_rationale": "species is required to interpret reuse eligibility",
+      "confidence": 0.95
+    },
+    {
+      "assertion_id": "mapping-metadata-39763604-endpoint",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "endpoint",
+      "target_schema": "MNMS",
+      "target_field": "behavioral_endpoints",
+      "mapping_rationale": "locomotor activity is the core endpoint under study",
+      "confidence": 0.9
+    },
+    {
+      "assertion_id": "mapping-metadata-39763604-temporal",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "temporal_structure",
+      "target_schema": "MNMS",
+      "target_field": "temporal_structure",
+      "mapping_rationale": "circadian interpretation depends on temporal structure",
+      "confidence": 0.9
+    },
+    {
+      "assertion_id": "mapping-metadata-39763604-housing",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "housing_context",
+      "target_schema": "MNMS",
+      "target_field": "housing_and_cage_context",
+      "mapping_rationale": "group housing changes locomotor interpretation",
+      "confidence": 0.85
+    },
+    {
+      "assertion_id": "mapping-metadata-39763604-platform",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "monitoring_platform",
+      "target_schema": "MNMS",
+      "target_field": "acquisition_system",
+      "mapping_rationale": "platform and sensor stack affect comparability",
+      "confidence": 0.9
+    },
+    {
+      "assertion_id": "mapping-metadata-39296476-species",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39296476",
+        "source_anchor": "title/abstract PMID 39296476",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "species",
+      "target_schema": "MNMS",
+      "target_field": "animal_characteristics",
+      "mapping_rationale": "species is required to interpret reuse eligibility",
+      "confidence": 0.95
+    },
+    {
+      "assertion_id": "mapping-metadata-39296476-endpoint",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39296476",
+        "source_anchor": "title/abstract PMID 39296476",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "endpoint",
+      "target_schema": "MNMS",
+      "target_field": "behavioral_endpoints",
+      "mapping_rationale": "locomotor activity is the core endpoint under study",
+      "confidence": 0.9
+    },
+    {
+      "assertion_id": "mapping-metadata-39296476-temporal",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39296476",
+        "source_anchor": "title/abstract PMID 39296476",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "temporal_structure",
+      "target_schema": "MNMS",
+      "target_field": "temporal_structure",
+      "mapping_rationale": "circadian interpretation depends on temporal structure",
+      "confidence": 0.9
+    },
+    {
+      "assertion_id": "mapping-metadata-39296476-platform",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39296476",
+        "source_anchor": "title/abstract PMID 39296476",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "monitoring_platform",
+      "target_schema": "MNMS",
+      "target_field": "acquisition_system",
+      "mapping_rationale": "platform and sensor stack affect comparability",
+      "confidence": 0.9
+    },
+    {
+      "assertion_id": "mapping-metadata-39534023-species",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39534023",
+        "source_anchor": "title/abstract PMID 39534023",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "species",
+      "target_schema": "MNMS",
+      "target_field": "animal_characteristics",
+      "mapping_rationale": "species is required to interpret reuse eligibility",
+      "confidence": 0.95
+    },
+    {
+      "assertion_id": "mapping-metadata-corpus-light-cycle",
+      "status": "proposed",
+      "epistemic_label": "uncertain",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "light_cycle_parameters",
+      "target_schema": "MNMS",
+      "target_field": "environmental_conditions",
+      "mapping_rationale": "light cycle is required for circadian reuse",
+      "confidence": 0.7
+    },
+    {
+      "assertion_id": "mapping-metadata-corpus-classifier-version",
+      "status": "proposed",
+      "epistemic_label": "uncertain",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Metadata Architect",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "local_field": "classifier_version",
+      "target_schema": "MNMS",
+      "target_field": "software_and_classifier",
+      "mapping_rationale": "classifier version impacts reproducibility",
+      "confidence": 0.7
+    }
+  ],
+  "graph_assertions": [
+    {
+      "assertion_id": "graph-39880968-species",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Knowledge Graph Engineer",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39880968",
+      "predicate": "has_species",
+      "object": "mouse",
+      "object_type": "species"
+    },
+    {
+      "assertion_id": "graph-39880968-platform",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Knowledge Graph Engineer",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39880968",
+      "predicate": "uses_system",
+      "object": "HCM_System_DVC",
+      "object_type": "HCM_System"
+    },
+    {
+      "assertion_id": "graph-39880968-circadian",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39880968",
+        "source_anchor": "title/abstract PMID 39880968",
+        "proposed_by": "Knowledge Graph Engineer",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39880968",
+      "predicate": "measures",
+      "object": "circadian_locomotor_activity",
+      "object_type": "endpoint"
+    },
+    {
+      "assertion_id": "graph-39371613-species",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39371613",
+        "source_anchor": "title/abstract PMID 39371613",
+        "proposed_by": "Knowledge Graph Engineer",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39371613",
+      "predicate": "has_species",
+      "object": "mouse",
+      "object_type": "species"
+    },
+    {
+      "assertion_id": "graph-39371613-circadian",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39371613",
+        "source_anchor": "title/abstract PMID 39371613",
+        "proposed_by": "Knowledge Graph Engineer",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39371613",
+      "predicate": "measures",
+      "object": "circadian_locomotor_activity",
+      "object_type": "endpoint"
+    },
+    {
+      "assertion_id": "graph-39763604-species",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Knowledge Graph Engineer",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39763604",
+      "predicate": "has_species",
+      "object": "mouse",
+      "object_type": "species"
+    },
+    {
+      "assertion_id": "graph-39763604-platform",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Knowledge Graph Engineer",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39763604",
+      "predicate": "uses_system",
+      "object": "HCM_System_DVC",
+      "object_type": "HCM_System"
+    },
+    {
+      "assertion_id": "graph-39763604-circadian",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39763604",
+        "source_anchor": "title/abstract PMID 39763604",
+        "proposed_by": "Knowledge Graph Engineer",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39763604",
+      "predicate": "measures",
+      "object": "circadian_locomotor_activity",
+      "object_type": "endpoint"
+    },
+    {
+      "assertion_id": "graph-39296476-species",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39296476",
+        "source_anchor": "title/abstract PMID 39296476",
+        "proposed_by": "Knowledge Graph Engineer",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39296476",
+      "predicate": "has_species",
+      "object": "mouse",
+      "object_type": "species"
+    },
+    {
+      "assertion_id": "graph-39296476-platform",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39296476",
+        "source_anchor": "title/abstract PMID 39296476",
+        "proposed_by": "Knowledge Graph Engineer",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39296476",
+      "predicate": "uses_system",
+      "object": "HCM_System_DVC",
+      "object_type": "HCM_System"
+    },
+    {
+      "assertion_id": "graph-39296476-circadian",
+      "status": "proposed",
+      "epistemic_label": "reported",
+      "provenance": {
+        "source_id": "PMID:39296476",
+        "source_anchor": "title/abstract PMID 39296476",
+        "proposed_by": "Knowledge Graph Engineer",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39296476",
+      "predicate": "measures",
+      "object": "circadian_locomotor_activity",
+      "object_type": "endpoint"
+    },
+    {
+      "assertion_id": "graph-39534023-species",
+      "status": "proposed",
+      "epistemic_label": "normalized",
+      "provenance": {
+        "source_id": "PMID:39534023",
+        "source_anchor": "title/abstract PMID 39534023",
+        "proposed_by": "Knowledge Graph Engineer",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "subject": "Study_39534023",
+      "predicate": "has_species",
+      "object": "mouse",
+      "object_type": "species"
+    }
+  ],
+  "review_notes": [
+    {
+      "note_id": "review-note-light-cycle",
+      "disposition": "flag",
+      "note": "Light-cycle parameters are not consistently recoverable from the fixed seed abstracts and should be treated as mandatory metadata before MNMS-style reuse.",
+      "provenance": {
+        "source_id": "seed_corpus",
+        "source_anchor": "fixed PMID corpus",
+        "proposed_by": "Reproducibility and Bias Auditor",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "related_assertion_ids": [
+        "metadata-corpus-light-cycle"
+      ]
+    },
+    {
+      "note_id": "review-note-classifier-version",
+      "disposition": "request_changes",
+      "note": "Classifier and software version details are not consistently reported at abstract level and require explicit recovery before cross-study comparison.",
+      "provenance": {
+        "source_id": "seed_corpus",
+        "source_anchor": "fixed PMID corpus",
+        "proposed_by": "Reproducibility and Bias Auditor",
+        "created_at": "2026-04-10T14:06:54+00:00"
+      },
+      "related_assertion_ids": [
+        "mapping-metadata-corpus-classifier-version",
+        "graph-39880968-platform",
+        "graph-39763604-platform",
+        "graph-39296476-platform"
+      ]
+    }
+  ]
+}
