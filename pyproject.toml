@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "research-swarm"
+name = "murmuration"
 version = "0.2.0"
 description = "A configurable multi-agent research swarm built on LangGraph — deploy your own autonomous research team for any scientific domain"
 readme = "README.md"
@@ -35,8 +35,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/dhuzard/piu-psych-swarm"
-"Bug Tracker" = "https://github.com/dhuzard/piu-psych-swarm/issues"
+Homepage = "https://github.com/Neuronautix/murmuration"
+"Bug Tracker" = "https://github.com/Neuronautix/murmuration/issues"
+Repository = "https://github.com/Neuronautix/murmuration"
+Changelog = "https://github.com/Neuronautix/murmuration/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 anthropic = ["langchain-anthropic>=0.3"]

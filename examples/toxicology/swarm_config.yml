@@ -1,0 +1,275 @@
+# ═══════════════════════════════════════════════════════════════
+# examples/toxicology/swarm_config.yml — TOCSAS: Toxicology Scientific Agent Squad
+# ═══════════════════════════════════════════════════════════════
+# Ported from dhuzard/PIU-Psych-Swarm PR #10, commit
+# 2ce8cb89727a30f65758008ce21724cb65d2d0ea (swarm_config_tocsas.yml).
+# Persona paths are relative to the repository root.
+# This file configures the TOCSAS domain-specific swarm for
+# preclinical toxicology metadata harmonization, MNMS alignment,
+# provenance-aware evidence synthesis, and knowledge graph design.
+#
+# Copy this file and adjust personas, tools, and reviewer rules
+# to your specific toxicology workflow without editing Python code.
+# ═══════════════════════════════════════════════════════════════
+
+# ── Swarm Identity ───────────────────────────────────
+swarm:
+  name: "TOCSAS"
+  description: "Toxicology Scientific Agent Squad — preclinical toxicology evidence structuring, MNMS metadata mapping, and provenance-aware knowledge graph design"
+  output_dir: "./Drafts/TOCSAS"
+  traceability_matrix: "./Knowledge_Traceability_Matrix_TOCSAS.md"
+
+# ── Orchestrator Settings ────────────────────────────
+orchestrator:
+  agent: "TOCSAS Dr. Nexus"
+  journalist: "TOCSAS Journalist"
+  max_agent_calls: 10
+  max_tool_rounds_per_agent: 6
+
+# ── LLM Backend ─────────────────────────────────────
+model:
+  provider: "openai"
+  name: "gpt-4o"
+  temperature: 0.1
+  env_key: "OPENAI_API_KEY"
+
+# ── Personas ─────────────────────────────────────────
+personas:
+  - name: "TOCSAS Dr. Nexus"
+    icon: "🔬"
+    role: "Orchestrator — coordinate tasks, integrate disagreements, enforce traceability and MNMS structure"
+    persona_file: "./examples/toxicology/agents/TOCSAS_DrNexus/persona.md"
+    tools:
+      - search_web
+      - search_literature
+      - search_kb
+      - append_traceability
+
+  - name: "TOCSAS LitScout"
+    icon: "📚"
+    role: "Literature cartographer — PubMed, live web, methods papers, toxicity-pathology references, citation network expansion"
+    persona_file: "./examples/toxicology/agents/TOCSAS_LitScout/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - trace_literature_network
+      - lookup_doi
+      - scrape_page
+      - search_web
+
+  - name: "TOCSAS Toxicology Lead"
+    icon: "☣️"
+    role: "Conservative toxicological interpreter — adaptive vs. adverse distinctions, design-contextualized findings"
+    persona_file: "./examples/toxicology/agents/TOCSAS_ToxLead/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - lookup_doi
+
+  - name: "TOCSAS Exposure & Design Specialist"
+    icon: "⚗️"
+    role: "Dose, route, schedule, formulation, vehicle, recovery, and toxicokinetics expert"
+    persona_file: "./examples/toxicology/agents/TOCSAS_ExposureDesign/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - lookup_doi
+
+  - name: "TOCSAS Pathology & Biomarker Analyst"
+    icon: "🔭"
+    role: "Clinical pathology, organ weights, histopathology, biomarker interpretation, severity grading"
+    persona_file: "./examples/toxicology/agents/TOCSAS_PathBiomarker/persona.md"
+    tools:
+      - search_literature
+      - search_preprints
+      - search_web
+      - search_kb
+      - scrape_page
+      - lookup_doi
+
+  - name: "TOCSAS Metadata Architect"
+    icon: "🗂️"
+    role: "Extract, normalize, and map metadata to MNMS — classify as core, extension, ambiguous, or missing"
+    persona_file: "./examples/toxicology/agents/TOCSAS_MetadataArchitect/persona.md"
+    tools:
+      - search_literature
+      - search_web
+      - search_kb
+      - check_schema_org
+      - append_traceability
+      - lookup_doi
+
+  - name: "TOCSAS Knowledge Graph Engineer"
+    icon: "🕸️"
+    role: "Convert study design, dose groups, tissues, endpoints, findings, and interpretation layers into graph-ready structures with provenance links"
+    persona_file: "./examples/toxicology/agents/TOCSAS_KGEngineer/persona.md"
+    tools:
+      - search_literature
+      - search_web
+      - search_kb
+      - append_traceability
+
+  - name: "TOCSAS Bias & Comparability Auditor"
+    icon: "🔎"
+    role: "Flag missing metadata, comparability problems, underreported exposure parameters, pathology ambiguity, and unsupported mechanistic language"
+    persona_file: "./examples/toxicology/agents/TOCSAS_BiasAuditor/persona.md"
+    tools:
+      - search_literature
+      - search_web
+      - search_kb
+      - append_traceability
+
+  - name: "TOCSAS Journalist"
+    icon: "✍️"
+    role: "Observer & Scribe — produce neutral, professional, citation-rich toxicology outputs"
+    persona_file: "./examples/toxicology/agents/TOCSAS_Journalist/persona.md"
+    tools:
+      - write_section
+      - append_traceability
+      - git_snapshot
+
+# ── Tools Registry ───────────────────────────────────
+tools:
+  search_literature:
+    module: "automation.tools"
+    function: "search_pubmed"
+    description: "Search PubMed for peer-reviewed biomedical and toxicology literature"
+
+  search_web:
+    module: "automation.tools"
+    function: "search_you_engine"
+    description: "Search the live web via You.com API"
+
+  check_schema_org:
+    module: "automation.tools"
+    function: "check_schema_org"
+    description: "Validate terms against the Schema.org vocabulary"
+
+  write_section:
+    module: "automation.tools"
+    function: "write_manuscript_section"
+    description: "Write a drafted section to disk as Markdown"
+
+  append_traceability:
+    module: "automation.tools"
+    function: "append_traceability_matrix"
+    description: "Log a fact and its source to the TOCSAS Knowledge Traceability Matrix"
+
+  search_kb:
+    module: "automation.tools"
+    function: "search_knowledge_base"
+    description: "Search the local vectorized toxicology Knowledge Base documents"
+
+  scrape_page:
+    module: "automation.tools"
+    function: "scrape_webpage"
+    description: "Fetch and extract full text content from a URL"
+
+  search_preprints:
+    module: "automation.tools"
+    function: "search_semantic_scholar"
+    description: "Search Semantic Scholar for preprints and recent toxicology publications"
+
+  trace_literature_network:
+    module: "automation.tools"
+    function: "trace_literature_network"
+    description: "Expand a major paper through its references and lead authors to surface adjacent toxicology literature"
+
+  you_research:
+    module: "automation.tools"
+    function: "you_research"
+    description: "You.com Research API: multi-step web synthesis with inline citations"
+
+  lookup_doi:
+    module: "automation.tools"
+    function: "lookup_doi"
+    description: "Look up full citation metadata via Europe PMC and Crossref — no API key required"
+
+  git_snapshot:
+    module: "automation.tools"
+    function: "git_commit_snapshot"
+    description: "Commit swarm output files (Drafts/TOCSAS/ and traceability matrix) to git"
+
+# ── Reviewer-2 (Adversarial Checkpoint) ──────────────
+reviewer:
+  enabled: true
+  max_revision_loops: 3
+
+  # Words that trigger automatic rejection in toxicology outputs
+  banned_words:
+    - "groundbreaking"
+    - "revolutionary"
+    - "game-changing"
+    - "paradigm-shifting"
+    - "unprecedented"
+    - "clearly toxic"
+    - "definitely caused"
+    - "proven mechanism"
+
+  # Structural elements TOCSAS outputs MUST contain
+  required_elements:
+    - "explicit separation of observed finding, quantitative change, interpretation, adversity judgment, and mechanistic speculation"
+    - "in-text citations (e.g., [1], [2]) for all major claims"
+    - "a formal 'References' section at the bottom"
+    - "a MNMS mapping table distinguishing MNMS core, toxicology extension, ambiguous, and missing fields"
+    - "a missing metadata and ambiguity report"
+    - "a conservative conclusions section that does not exceed what the cited evidence supports"
+    - "when reporting dose-response relationships, the route, vehicle, and schedule must be stated; claims without these are flagged"
+    - "when reporting histopathology findings, the severity grade or grading system must be stated where available"
+    - "when claiming adversity, the criteria applied (e.g., Frank et al. 2012, EMA CHMP guidance) must be cited"
+
+  # Patterns that trigger automatic rejection
+  rejection_patterns:
+    - "any claim that statistical significance alone establishes toxicological relevance"
+    - "any assertion of causal mechanism without supporting mechanistic evidence cited"
+    - "any equating of administered dose with measured systemic exposure without toxicokinetic data"
+    - "any adversity judgment without explicit criteria citation"
+
+  # Tone enforcement
+  tone: "strictly factual, scientifically conservative, and neutral; distinguish observation from interpretation at all times"
+
+  model:
+    name: "gpt-4o"
+    temperature: 0.8
+
+# ── Human-in-the-Loop (HITL) Checkpoints ─────────────
+hitl:
+  enabled: false
+  checkpoints:
+    - pre_flight
+    - post_plan
+    - pre_journalist
+    - on_rejection
+
+# ── Epistemic Tags ───────────────────────────────────
+# Toxicology-specific epistemic classification for the traceability matrix.
+epistemic_tags:
+  - "[OBSERVATION]"     # Directly reported measurement or finding from a cited study
+  - "[INTERPRETATION]"  # Author's or analyst's reading of an observation
+  - "[ADVERSITY_CLAIM]" # A judgment that a finding meets adversity criteria — requires criteria citation
+  - "[MECHANISM]"       # Proposed biological mechanism — must be distinguished from association
+  - "[INFERENCE]"       # Cautious synthesis across multiple supported facts
+  - "[SPECULATION]"     # Forward-looking or unsupported extrapolation — explicitly marked as tentative
+  - "[MISSING_DATA]"    # A metadata element required for interpretation that was not reported
+
+# ── Mandatory Output Sections ─────────────────────────
+# The Journalist must produce all sections listed here.
+# Note: the runtime does not read this key. The sections are enforced
+# through the TOCSAS Dr. Nexus and Journalist personas and the reviewer rules.
+output_sections:
+  - "A. Research Scope"
+  - "B. Key Evidence Summary"
+  - "C. Evidence Table with In-Text Citations"
+  - "D. Toxicology MNMS Mapping Table"
+  - "E. Toxicology Extension Proposal"
+  - "F. Missing Metadata and Ambiguity Report"
+  - "G. Knowledge Graph Schema Proposal"
+  - "H. Comparability and Interpretation Risks"
+  - "I. Conservative Conclusions"
+  - "J. References"

@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: "Research Swarm: A Configurable Multi-Agent Research Framework"
+title: "Murmuration: A Configurable Multi-Agent Research Framework"
 message: >-
   If you use this software in your research, please cite it using
   the metadata below.
@@ -12,14 +12,15 @@ authors:
 version: 0.2.0
 date-released: "2026-04-09"
 license: MIT
-repository-code: "https://github.com/dhuzard/piu-psych-swarm"
+repository-code: "https://github.com/Neuronautix/murmuration"
 abstract: >-
-  Research Swarm is a configuration-driven multi-agent research framework
+  Murmuration is a configuration-driven multi-agent research framework
   built on LangGraph. It deploys an autonomous team of AI specialists
   (orchestrator, domain experts, journalist, adversarial reviewer) that
   search databases, synthesise evidence, and produce citable research
   manuscripts — all customisable through a single YAML file without
-  modifying Python code.
+  modifying Python code. Formerly published as METODAX
+  (github.com/dhuzard/metodax).
 keywords:
   - multi-agent systems
   - large language models
@@ -27,3 +28,4 @@ keywords:
   - LangGraph
   - autonomous agents
   - systematic review
+  - METODAX

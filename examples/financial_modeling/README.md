@@ -1,6 +1,6 @@
 # Financial Modeling Example
 
-A ready-to-run Research Swarm configuration for financial research and risk
+A ready-to-run Murmuration configuration for financial research and risk
 analysis. Designed for conservative, evidence-based investment analysis with
 built-in compliance guardrails.
 
