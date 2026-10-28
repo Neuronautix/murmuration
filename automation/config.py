@@ -77,11 +77,43 @@ def _validate_options(config: dict) -> None:
         raise ValueError(f"swarm_config.yml: swarm.persist_findings must be true or false, not {persist!r}.")
 
     _validate_checkpointer(config)
+    _validate_reviewer_options(config.get("reviewer") or {})
 
     for persona in config.get("personas") or []:
         if not isinstance(persona, dict):
             continue  # malformed entries are reported by doctor / fail in get_persona_config
         _validate_model_override(persona.get("model"), f"personas[{persona.get('name', '?')}].model")
+
+
+REVIEWER_CONTEXT_ITEMS = ("draft", "task", "matrix")
+
+
+def _validate_reviewer_options(reviewer: dict) -> None:
+    def whole(key, minimum, default):
+        value = reviewer.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise ValueError(
+                f"swarm_config.yml: reviewer.{key} must be a whole number of at least {minimum}, not {value!r}."
+            )
+
+    on_rejection = reviewer.get("on_rejection", "journalist")
+    if on_rejection not in ("journalist", "orchestrator", "auto"):
+        raise ValueError(
+            f"swarm_config.yml: reviewer.on_rejection must be journalist, orchestrator or auto, not {on_rejection!r}."
+        )
+    on_max = reviewer.get("on_max_revisions", "flag")
+    if on_max not in ("flag", "fail"):
+        raise ValueError(f"swarm_config.yml: reviewer.on_max_revisions must be flag or fail, not {on_max!r}.")
+    whole("max_evidence_loops", 0, 1)
+    whole("matrix_excerpt_rows", 1, 50)
+    context = reviewer.get("context", ["draft"])
+    if not isinstance(context, list) or not context or any(c not in REVIEWER_CONTEXT_ITEMS for c in context):
+        raise ValueError(
+            f"swarm_config.yml: reviewer.context must be a non-empty list drawn from "
+            f"{', '.join(REVIEWER_CONTEXT_ITEMS)}, not {context!r}."
+        )
+    if "draft" not in context:
+        raise ValueError("swarm_config.yml: reviewer.context must include draft (the text under review).")
 
 
 CHECKPOINTER_TYPES = ("none", "memory", "sqlite")

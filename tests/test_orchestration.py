@@ -2009,3 +2009,336 @@ def test_doctor_warns_when_min_rounds_equals_max_agent_calls(tmp_path):
     real["orchestrator"].update({"max_agent_calls": 2, "early_stop": {"enabled": True, "min_rounds": 2}})
     (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
     assert any("early stop can never apply" in i.message for i in inspect_swarm(tmp_path).issues)
+
+
+# ── 16. Reviewer evidence loop, verdict policy and context (I1, R2, R10) ───
+
+
+class StructuredReviewer(FakeReviewer):
+    """Reviewer whose structured-output view replays ReviewerVerdicts (None = unparseable reply)."""
+
+    def __init__(self, verdicts, text_replies=("APPROVED",)):
+        super().__init__(text_replies)
+        self.verdicts = list(verdicts)
+        self.structured_calls = []
+
+    def with_structured_output(self, schema, **kwargs):
+        reviewer = self
+
+        class _View:
+            def invoke(self, msgs):
+                reviewer.structured_calls.append(msgs)
+                v = reviewer.verdicts.pop(0) if len(reviewer.verdicts) > 1 else reviewer.verdicts[0]
+                return {"raw": AIMessage(content="", usage_metadata=USAGE), "parsed": v,
+                        "parsing_error": None if v is not None else ValueError("bad json")}
+        return _View()
+
+
+def verdict(ok, issues=(), missing=()):
+    from automation.graph import EvidenceRequest, ReviewerVerdict
+    return ReviewerVerdict(
+        verdict="APPROVED" if ok else "REJECTED", style_issues=list(issues),
+        missing_evidence=[EvidenceRequest(claim=c, reason=r, suggested_agent=a) for c, r, a in missing],
+    )
+
+
+def _reviewer_cfg(**reviewer):
+    cfg = make_config()
+    cfg["reviewer"].update(reviewer)
+    return cfg
+
+
+def test_rejection_with_missing_evidence_goes_back_to_the_orchestrator():
+    cfg = _reviewer_cfg(on_rejection="orchestrator")
+    chat = FakeChat([decision(["Journalist"]), decision(["A"], "check the dose claim"), decision(["Journalist"])])
+    reviewer = StructuredReviewer([verdict(False, ["tone"], [("dose X is safe", "no source", "A")]),
+                                   verdict(True)])
+    graph = build(cfg, chat, reviewer)
+    assert node_sequence(graph) == ["orchestrator", "Journalist", "reviewer", "orchestrator", "A",
+                                    "orchestrator", "Journalist", "reviewer"]
+    chat = FakeChat([decision(["Journalist"]), decision(["A"], "check the dose claim"), decision(["Journalist"])])
+    reviewer = StructuredReviewer([verdict(False, ["tone"], [("dose X is safe", "no source", "A")]),
+                                   verdict(True)])
+    state = run(build(cfg, chat, reviewer))
+    assert state["final_status"] == "approved" and state["evidence_loop_count"] == 1
+    routing = next(m for m in chat.router.calls[1] if isinstance(m, HumanMessage)).content
+    assert "REVIEWER REQUESTS" in routing and "• dose X is safe — no source (suggested: A)" in routing
+    # Still shown while the round is open (after A returns), cleared once it hands back to the Journalist.
+    assert "REVIEWER REQUESTS" in next(m for m in chat.router.calls[2] if isinstance(m, HumanMessage)).content
+    assert state["review_route"] == "journalist" and state["reviewer_requests"] == []
+    revision = chat.human("Journalist", 1)
+    assert "REVISION INSTRUCTIONS FROM REVIEWER-2:\nREJECTED:\n- tone\n- Missing evidence: dose X is safe" in revision
+    assert "check the dose claim" not in revision.split("REVISION INSTRUCTIONS")[1]
+
+
+def test_auto_route_uses_the_orchestrator_only_for_missing_evidence_and_within_the_loop_budget():
+    cfg = _reviewer_cfg(on_rejection="auto", max_evidence_loops=1)
+    chat = FakeChat([decision(["Journalist"]), decision(["A"]), decision(["Journalist"])])
+    reviewer = StructuredReviewer([verdict(False, ["style only"]),                       # → Journalist
+                                   verdict(False, [], [("c1", "r1", None)]),             # → orchestrator
+                                   verdict(False, [], [("c2", "r2", None)]),             # budget spent → Journalist
+                                   verdict(True)])
+    seq = node_sequence(build(cfg, chat, reviewer))
+    assert seq == ["orchestrator", "Journalist", "reviewer", "Journalist", "reviewer", "orchestrator", "A",
+                   "orchestrator", "Journalist", "reviewer", "Journalist", "reviewer"]
+
+
+def test_unknown_suggested_agent_is_ignored():
+    cfg = _reviewer_cfg(on_rejection="orchestrator")
+    chat = FakeChat([decision(["Journalist"]), decision(["Journalist"])])
+    reviewer = StructuredReviewer([verdict(False, [], [("c", "r", "Ghost")]), verdict(True)])
+    state = run(build(cfg, chat, reviewer))
+    from automation.graph import _evidence_requests
+    assert _evidence_requests(verdict(False, [], [("c", "r", "Ghost"), ("d", "s", "A")]), ["A", "B"]) == [
+        {"claim": "c", "reason": "r", "suggested_agent": None}, {"claim": "d", "reason": "s", "suggested_agent": "A"}]
+    assert state["final_status"] == "approved"
+    routing = next(m for m in chat.router.calls[1] if isinstance(m, HumanMessage)).content
+    assert "• c — r" in routing and "Ghost" not in routing
+
+
+def test_unparseable_structured_verdict_falls_back_to_the_text_protocol():
+    cfg = _reviewer_cfg(on_rejection="auto", custom_prompt="Reply APPROVED or REJECTED: reasons.")
+    chat = FakeChat([decision(["Journalist"])])
+    reviewer = StructuredReviewer([None], text_replies=["REJECTED: weak", "APPROVED"])
+    state = run(build(cfg, chat, reviewer))
+    assert state["final_status"] == "approved" and len(reviewer.calls) == 2      # two text calls
+    assert len(reviewer.structured_calls) == 2                                   # each after a structured try
+    assert "Be strict" not in reviewer.calls[0][0].content                      # custom prompt used verbatim
+    assert reviewer.calls[0][0].content == "Reply APPROVED or REJECTED: reasons."
+    assert "REJECTED: weak" in chat.human("Journalist", 1)
+    assert state["token_usage"]["total_tokens"] > 0
+
+
+def test_default_reviewer_keeps_the_text_protocol_and_the_draft_only():
+    chat = FakeChat([decision(["Journalist"])])
+    reviewer = StructuredReviewer([verdict(False)], text_replies=["APPROVED"])
+    run(build(make_config(), chat, reviewer))
+    assert reviewer.structured_calls == []
+    assert reviewer.calls[0][1].content == "findings from Journalist #1"
+
+
+def test_on_max_revisions_fail_reviews_the_last_draft_and_fails_the_run():
+    chat = FakeChat([decision(["Journalist"])])
+    reviewer = FakeReviewer(["REJECTED: never good enough"])
+    state = run(build(_reviewer_cfg(max_revision_loops=2, on_max_revisions="fail"), chat, reviewer))
+    assert len(reviewer.calls) == 3            # the third draft is read, not force-approved
+    assert state["final_status"] == "failed" and state["reviewer_approved"] is False
+    chat = FakeChat([decision(["Journalist"])])
+    reviewer = FakeReviewer(["REJECTED: a", "REJECTED: b", "APPROVED"])
+    state = run(build(_reviewer_cfg(max_revision_loops=2, on_max_revisions="fail"), chat, reviewer))
+    assert state["final_status"] == "approved"
+
+
+def test_reviewer_context_adds_the_task_and_this_runs_matrix_rows(tmp_path):
+    matrix = tmp_path / "M.md"
+    matrix.write_text(MATRIX_HEADER + "\n### Run: old | Task: t\n\n| *old* | **A** | stale | m | **[FACT]** |\n"
+                      "\n### Run: now | Task: t\n\n| *s1* | **A** | fresh claim | m | **[FACT]** |\n"
+                      "| *s2* | **B** | second claim | m | **[FACT]** |\n", encoding="utf-8")
+    cfg = _reviewer_cfg(context=["draft", "task", "matrix"], matrix_excerpt_rows=1)
+    cfg["swarm"]["traceability_matrix"] = str(matrix)
+    reviewer = FakeReviewer(["APPROVED"])
+    run(build(cfg, FakeChat([decision(["Journalist"])]), reviewer), initial_state("the task"))
+    sent = reviewer.calls[0][1].content
+    assert sent.startswith("RESEARCH TASK:\nthe task\n\nDRAFT TO REVIEW:\nfindings from Journalist #1")
+    assert "second claim" in sent and "fresh claim" not in sent and "stale" not in sent
+
+
+def test_hitl_on_rejection_works_with_the_orchestrator_route():
+    cfg = _reviewer_cfg(on_rejection="orchestrator")
+    cfg["hitl"] = {"enabled": True, "checkpoints": ["on_rejection", "pre_journalist"]}
+    chat = FakeChat([decision(["Journalist"]), decision(["A"]), decision(["Journalist"])])
+    reviewer = StructuredReviewer([verdict(False, [], [("c", "r", "A")]), verdict(True)])
+    graph = build(cfg, chat, reviewer)
+    rc = {"configurable": {"thread_id": "rev-orch"}}
+    paused = run(graph, config=rc)
+    assert paused["__interrupt__"][0].value["checkpoint"] == "pre_journalist"
+    paused = resume(graph, "", rc)
+    question = paused["__interrupt__"][0].value
+    assert question["checkpoint"] == "on_rejection" and "the orchestrator" in question["question"]
+    final = resume(graph, "Focus on the dose table", rc)            # custom text, still via the orchestrator
+    assert final["final_status"] == "approved" and chat.count("A") == 1
+    routing = next(m for m in chat.router.calls[1] if isinstance(m, HumanMessage)).content
+    assert "Focus on the dose table" in routing
+    assert "Focus on the dose table" in chat.human("Journalist", 1)
+    # pre_journalist is asked once: the evidence round goes straight back to the Journalist.
+    assert len(chat.router.calls) == 3
+
+
+def test_hitl_override_ends_an_orchestrator_routed_rejection():
+    cfg = _reviewer_cfg(on_rejection="orchestrator")
+    cfg["hitl"] = {"enabled": True, "checkpoints": ["on_rejection"]}
+    chat = FakeChat([decision(["Journalist"])])
+    graph = build(cfg, chat, StructuredReviewer([verdict(False, [], [("c", "r", None)])]))
+    rc = {"configurable": {"thread_id": "rev-ovr"}}
+    run(graph, config=rc)
+    assert resume(graph, "OVERRIDE", rc)["final_status"] == "overridden" and len(chat.router.calls) == 1
+
+
+def test_recursion_limit_covers_the_worst_case_evidence_loop():
+    from automation.graph import compute_recursion_limit
+    cfg = _reviewer_cfg(on_rejection="orchestrator", max_evidence_loops=2, max_revision_loops=3)
+    cfg["orchestrator"]["max_agent_calls"] = 2
+    chat = FakeChat([decision(["A"])])                        # always asks for more evidence
+    reviewer = StructuredReviewer([verdict(False, [], [("c", "r", "A")])])
+    steps = len(node_sequence(build(cfg, chat, reviewer), config={"recursion_limit": compute_recursion_limit(cfg)}))
+    assert steps < compute_recursion_limit(cfg)
+    assert compute_recursion_limit(cfg) == compute_recursion_limit(_reviewer_cfg(max_revision_loops=3) | {
+        "orchestrator": cfg["orchestrator"]}) + 4
+
+
+@pytest.mark.parametrize("key, value, message", [
+    ("on_rejection", "specialists", "reviewer.on_rejection"),
+    ("on_max_revisions", "approve", "reviewer.on_max_revisions"),
+    ("max_evidence_loops", -1, "reviewer.max_evidence_loops"),
+    ("matrix_excerpt_rows", 0, "reviewer.matrix_excerpt_rows"),
+    ("context", ["draft", "web"], "reviewer.context"),
+    ("context", ["task"], "reviewer.context must include draft"),
+])
+def test_load_config_rejects_bad_reviewer_options(tmp_path, key, value, message):
+    import yaml
+
+    from automation.config import CONFIG_PATH, load_config
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["reviewer"][key] = value
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        load_config(tmp_path / "swarm_config.yml")
+
+
+def test_doctor_flags_reviewer_routing_that_cannot_take_effect(tmp_path):
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["reviewer"].update({"on_rejection": "auto", "max_evidence_loops": 0, "context": ["draft", "matrix"]})
+    for persona in real["personas"]:
+        persona["tools"] = [t for t in persona["tools"] if t != "append_traceability"] or ["search_web"]
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    messages = [i.message for i in inspect_swarm(tmp_path).issues]
+    assert any("max_evidence_loops is 0" in m for m in messages)
+    assert any("reviewer.context includes matrix" in m for m in messages)
+
+
+def test_early_stop_does_not_cancel_an_evidence_round():
+    cfg = _reviewer_cfg(on_rejection="orchestrator")
+    cfg["orchestrator"]["early_stop"] = {"enabled": True, "min_rounds": 1}
+    chat = FakeChat([decision(["A"]), decision(["Journalist"]), stop_decision(["B"]), decision(["Journalist"])])
+    reviewer = StructuredReviewer([verdict(False, [], [("c", "r", "B")]), verdict(True)])
+    run(build(cfg, chat, reviewer))
+    assert chat.count("B") == 1
+
+
+def test_no_evidence_round_once_the_specialist_budget_is_spent():
+    cfg = _reviewer_cfg(on_rejection="orchestrator")
+    cfg["orchestrator"]["max_agent_calls"] = 1
+    chat = FakeChat([decision(["A"]), decision(["Journalist"])])
+    reviewer = StructuredReviewer([verdict(False, [], [("c", "r", "A")]), verdict(True)])
+    seq = node_sequence(build(cfg, chat, reviewer))
+    assert seq == ["orchestrator", "A", "orchestrator", "Journalist", "reviewer", "Journalist", "reviewer"]
+
+
+def test_unparseable_structured_reply_in_text_form_needs_no_second_call():
+    class RawReviewer(StructuredReviewer):
+        def with_structured_output(self, schema, **kwargs):
+            reviewer = self
+
+            class _View:
+                def invoke(self, msgs):
+                    reviewer.structured_calls.append(msgs)
+                    return {"raw": AIMessage(content="**APPROVED**", usage_metadata=USAGE), "parsed": None,
+                            "parsing_error": ValueError("not json")}
+            return _View()
+
+    reviewer = RawReviewer([None])
+    state = run(build(_reviewer_cfg(on_rejection="auto"), FakeChat([decision(["Journalist"])]), reviewer))
+    assert state["final_status"] == "approved" and reviewer.calls == [] and len(reviewer.structured_calls) == 1
+
+
+def test_structured_call_exception_falls_back_to_text():
+    class Exploding(StructuredReviewer):
+        def with_structured_output(self, schema, **kwargs):
+            class _View:
+                def invoke(self, msgs):
+                    raise RuntimeError("provider rejected the schema")
+            return _View()
+
+    reviewer = Exploding([None], text_replies=["APPROVED"])
+    state = run(build(_reviewer_cfg(on_rejection="orchestrator"), FakeChat([decision(["Journalist"])]), reviewer))
+    assert state["final_status"] == "approved" and len(reviewer.calls) == 1
+
+
+def test_matrix_excerpt_keeps_rows_logged_before_a_resume(tmp_path):
+    from automation.graph import _matrix_excerpt
+    matrix = tmp_path / "M.md"
+    matrix.write_text(MATRIX_HEADER + "\n### Run: old | Task: t\n\n| *o* | **A** | stale | m | **[FACT]** |\n"
+                      "\n### Run: now | Task: t\n\n| *s1* | **A** | before crash | m | **[FACT]** |\n"
+                      "\n### Resumed run th-1: now | Task: t\n\n| *s2* | **B** | after resume | m | **[FACT]** |\n",
+                      encoding="utf-8")
+    excerpt = _matrix_excerpt({"swarm": {"traceability_matrix": str(matrix)}}, 50)
+    assert "before crash" in excerpt and "after resume" in excerpt and "stale" not in excerpt
+
+
+def test_default_on_rejection_question_wording_is_unchanged():
+    cfg = make_config(hitl={"enabled": True, "checkpoints": ["on_rejection"]})
+    graph = build(cfg, FakeChat([decision(["Journalist"])]), FakeReviewer(["REJECTED: x"]))
+    paused = run(graph, config={"configurable": {"thread_id": "wording"}})
+    question = paused["__interrupt__"][0].value["question"]
+    assert "REVISE   — send back to Journalist with reviewer feedback (default)" in question
+    assert "Or type your own revision instructions for the Journalist:" in question
+
+
+def test_run_log_records_the_reason_of_a_final_review_failure(tmp_path):
+    from automation.main import _run_graph_async
+    cfg = _reviewer_cfg(max_revision_loops=1, on_max_revisions="fail")
+    cfg["swarm"]["run_log"] = str(tmp_path / "r.jsonl")
+    graph = build(cfg, FakeChat([decision(["Journalist"])]), FakeReviewer(["REJECTED: still wrong"]))
+    asyncio.run(_run_graph_async(cfg, "task", graph, {}))
+    last_review = [line for line in _read_jsonl(tmp_path / "r.jsonl") if line.get("node") == "reviewer"][-1]
+    assert last_review["verdict"] == "failed" and last_review["feedback"] == "REJECTED: still wrong"
+
+
+def test_doctor_ignores_an_orchestrator_logger_whose_tools_are_not_loaded(tmp_path):
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["reviewer"]["context"] = ["draft", "matrix"]
+    for persona in real["personas"]:
+        if persona["name"] != real["orchestrator"]["agent"]:
+            persona["tools"] = [t for t in persona["tools"] if t != "append_traceability"] or ["search_web"]
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    assert any("reviewer.context includes matrix" in i.message for i in inspect_swarm(tmp_path).issues)
+    real["orchestrator"]["allow_tools"] = True
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    assert not any("reviewer.context includes matrix" in i.message for i in inspect_swarm(tmp_path).issues)
+
+
+def test_recursion_limit_covers_journalist_first_evidence_rounds_with_hitl():
+    """Worst case: draft first, then every rejection triggers an evidence round, fail mode, all checkpoints."""
+    from automation.graph import compute_recursion_limit
+    cfg = _reviewer_cfg(on_rejection="orchestrator", max_evidence_loops=2, max_revision_loops=3,
+                        on_max_revisions="fail")
+    cfg["orchestrator"]["max_agent_calls"] = 4
+    cfg["hitl"] = {"enabled": True, "checkpoints": ["post_plan", "pre_journalist", "on_rejection"]}
+    plan = [decision(["Journalist"])] + [decision(["A"]), decision(["Journalist"])] * 2
+    chat = FakeChat(plan)
+    reviewer = StructuredReviewer([verdict(False, [], [("c", "r", "A")])])
+    graph = build(cfg, chat, reviewer)
+    rc = {"configurable": {"thread_id": "worst"}, "recursion_limit": compute_recursion_limit(cfg)}
+
+    async def go():
+        seq, command = [], initial_state()
+        while True:
+            paused = False
+            async for ev in graph.astream(command, config=rc, stream_mode="updates"):
+                seq.extend(k for k in ev if k != "__interrupt__")
+                if "__interrupt__" in ev:
+                    paused = True
+            if not paused:
+                return seq
+            command = Command(resume="")
+    seq = asyncio.run(go())
+    assert seq.count("orchestrator") == 5 and seq.count("reviewer") == 4
+    assert len(seq) < compute_recursion_limit(cfg)

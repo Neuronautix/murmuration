@@ -354,8 +354,11 @@ class _RunRecorder:
         if "reviewer_approved" in update:
             approved = update["reviewer_approved"]
             record["verdict"] = update.get("final_status") or ("approved" if approved else "rejected")
-            if not approved and update.get("next_instructions"):
-                record["feedback"] = update["next_instructions"]
+            feedback = update.get("reviewer_feedback") or update.get("next_instructions")
+            if not approved and feedback:
+                record["feedback"] = feedback
+            if update.get("review_route"):
+                record["review_route"] = update["review_route"]
         if update.get("agent_outputs"):
             record["outputs_from"] = list(update["agent_outputs"])
         if update.get("messages"):
@@ -451,6 +454,11 @@ async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict,
         "agent_call_count": 0,
         "reviewer_approved": False,
         "revision_count": 0,
+        "reviewer_feedback": "",
+        "reviewer_requests": [],
+        "review_route": "",
+        "evidence_loop_count": 0,
+        "specialist_rounds": 0,
         "final_status": "",
         "token_usage": {},
     }
@@ -655,8 +663,8 @@ def _run_graph(config: dict, prompt: str, resume_thread: str | None = None) -> N
 
     if final_status == "failed":
         typer.secho(
-            "\n❌ Run finished without a usable draft: the Journalist produced no text. "
-            "See the messages above for agent failures.",
+            "\n❌ Run finished without a usable draft: the Journalist produced no text, or Reviewer-2 "
+            "rejected the final draft (reviewer.on_max_revisions: fail). See the messages above.",
             fg=typer.colors.RED,
         )
         typer.secho(f"📂 Partial outputs, if any, are in '{output_dir}/'", fg=typer.colors.CYAN)

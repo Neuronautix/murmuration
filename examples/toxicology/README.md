@@ -49,6 +49,14 @@ make run PROMPT="Map the metadata needed to compare 90-day rat oral toxicity stu
 A live run needs the usual model and search credentials. Offline configuration
 checks are in `tests/test_example_packs.py`.
 
+The Journalist persona asks it to "insert [SOURCE NEEDED] and notify Dr. Nexus"
+when a claim lacks a traceable source. The Journalist cannot route the run
+itself, but the reviewer can: with `reviewer.on_rejection: auto` (and optionally
+`reviewer.context: [draft, task, matrix]`), a draft with unsupported claims is
+sent back to Dr. Nexus, who dispatches specialists to source them before the
+Journalist revises. The pack keeps the default (`journalist`) so its runs are
+unchanged; add the key to `swarm_config.yml` to turn this on.
+
 ## Adaptations from the donor
 
 - `swarm_config_tocsas.yml` became `swarm_config.yml`, and persona paths now

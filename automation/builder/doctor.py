@@ -228,6 +228,34 @@ def _check_run_artefacts(report: SwarmDoctorReport, config: dict) -> None:
                 ))
 
 
+def _check_reviewer_routing(report: SwarmDoctorReport, config: dict) -> None:
+    """reviewer.on_rejection / context settings that cannot take effect."""
+    reviewer = config.get("reviewer") or {}
+    on_rejection = reviewer.get("on_rejection", "journalist")
+    if on_rejection != "journalist":
+        if not reviewer.get("enabled", True):
+            report.issues.append(ValidationIssue(
+                "warning", f"reviewer.on_rejection is '{on_rejection}' but the reviewer is disabled",
+                "swarm_config.yml",
+            ))
+        elif reviewer.get("max_evidence_loops", 1) == 0:
+            report.issues.append(ValidationIssue(
+                "warning", f"reviewer.on_rejection is '{on_rejection}' but max_evidence_loops is 0, so every "
+                "rejection still goes to the Journalist", "swarm_config.yml",
+            ))
+    if "matrix" in (reviewer.get("context") or []):
+        trace_tools = {name for name, spec in (config.get("tools") or {}).items()
+                       if (spec or {}).get("function") == "append_traceability_matrix"}
+        orchestrator = (config.get("orchestrator") or {})
+        loggers = [p for p in config.get("personas", []) if trace_tools & set(p.get("tools", []))
+                   and (p.get("name") != orchestrator.get("agent") or orchestrator.get("allow_tools") is True)]
+        if not loggers:
+            report.issues.append(ValidationIssue(
+                "warning", "reviewer.context includes matrix, but no persona can log to the traceability "
+                "matrix, so the reviewer will see an empty excerpt", "swarm_config.yml",
+            ))
+
+
 def _check_early_stop(report: SwarmDoctorReport, orchestrator: dict) -> None:
     """early_stop.min_rounds at or above max_agent_calls can never be reached.
 
@@ -449,6 +477,7 @@ def inspect_swarm(root_dir: Path) -> SwarmDoctorReport:
     _check_persona_models(report, config)
     _check_checkpointer(report, config)
     _check_early_stop(report, orchestrator_block)
+    _check_reviewer_routing(report, config)
     _check_traceability_coverage(
         report,
         personas,

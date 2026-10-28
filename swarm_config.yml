@@ -320,6 +320,28 @@ reviewer:
   #   temperature: 0.8
   #   env_key: "GOOGLE_API_KEY"
 
+  # ── What happens after a rejection (all optional; defaults shown) ──────────
+  # on_rejection:  journalist   — the Journalist revises alone (default)
+  #                orchestrator — the orchestrator first gathers more evidence for the
+  #                               rejected claims, then the Journalist revises
+  #                auto         — orchestrator only when the reviewer reports missing
+  #                               evidence, otherwise the Journalist
+  #                With orchestrator/auto the reviewer answers in a structured form
+  #                (verdict, style_issues, missing_evidence); if that fails, the
+  #                APPROVED / REJECTED: text protocol is used, so custom_prompt still works.
+  # max_evidence_loops: 1       — reviewer-triggered orchestrator rounds per run
+  # on_max_revisions: flag      — after max_revision_loops rejections the next draft is
+  #                               force-approved and flagged (default); "fail" reviews it
+  #                               once more and fails the run if it is still rejected
+  # context: [draft]            — what the reviewer sees; add "task" and/or "matrix"
+  #                               (this run's traceability rows, to check citations)
+  # matrix_excerpt_rows: 50     — matrix rows shown with context: matrix
+  # on_rejection: auto
+  # max_evidence_loops: 1
+  # on_max_revisions: flag
+  # context: [draft, task, matrix]
+  # matrix_excerpt_rows: 50
+
   # Optional: Override the auto-generated reviewer prompt entirely.
   # Uncomment and edit to use a fully custom reviewer prompt.
   # custom_prompt: |

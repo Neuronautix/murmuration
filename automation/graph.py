@@ -78,7 +78,7 @@ import asyncio
 import contextlib
 import re
 import weakref
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -103,6 +103,7 @@ from automation.config import (
     load_config,
     load_tools_for_persona,
     persona_model_config,
+    resolve_swarm_path,
 )
 
 # Characters retained from each peer agent's output when shown to another
@@ -167,6 +168,10 @@ class GraphState(TypedDict):
     specialist_rounds       Orchestrator passes that dispatched at least one specialist.
     reviewer_approved       Set True once Reviewer-2 approves the Journalist draft.
     revision_count          Number of Journalist revision cycles completed.
+    reviewer_feedback       Latest rejection reasons, shown to the Journalist on revision.
+    reviewer_requests       Evidence requests from the latest structured rejection.
+    review_route            Where the latest rejection goes: journalist or orchestrator.
+    evidence_loop_count     Reviewer-triggered orchestrator round-trips (reviewer.max_evidence_loops).
     final_status            approved | force_approved | overridden | completed | failed.
     token_usage             Accumulated token counts across all LLM calls in the run.
     """
@@ -184,6 +189,10 @@ class GraphState(TypedDict):
     specialist_rounds: int     # orchestrator passes that dispatched specialists (early stop)
     reviewer_approved: bool
     revision_count: int
+    reviewer_feedback: str     # the latest rejection reasons (survive an orchestrator round)
+    reviewer_requests: list    # list[dict]: EvidenceRequest objects from the latest rejection
+    review_route: str          # "journalist" | "orchestrator": where the latest rejection goes
+    evidence_loop_count: int   # reviewer-triggered orchestrator round-trips so far
     final_status: str
     token_usage: Annotated[dict, _merge_token_usage]
 
@@ -204,6 +213,24 @@ class OrchestratorDecision(BaseModel):
     # Read only with orchestrator.early_stop.enabled; the defaults keep older replies parsing.
     sufficient_evidence: bool = False      # the findings already answer the task
     coverage: str = ""                     # what the findings cover and what is still missing
+
+
+# ── Reviewer verdict schema (reviewer.on_rejection: orchestrator | auto) ───
+
+class EvidenceRequest(BaseModel):
+    """A claim in the draft that needs more evidence from the research team."""
+    claim: str
+    reason: str
+    suggested_agent: str | None = None     # ignored unless it names a specialist
+
+
+class ReviewerVerdict(BaseModel):
+    verdict: Literal["APPROVED", "REJECTED"]
+    style_issues: list[str] = []                    # the Journalist can fix these alone
+    missing_evidence: list[EvidenceRequest] = []    # these need a specialist
+
+
+REVIEWER_ROUTES = ("journalist", "orchestrator", "auto")
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────
@@ -450,6 +477,10 @@ def compute_recursion_limit(config: dict) -> int:
     max_calls = max(1, int(orch.get("max_agent_calls", 8)))
     max_rev = max(0, int(rev.get("max_revision_loops", 3))) if rev.get("enabled", True) else 0
     limit = 2 * max_calls + 2 * (max_rev + 1) + 4
+    if rev.get("enabled", True) and rev.get("on_rejection", "journalist") != "journalist":
+        # Each reviewer evidence round adds an orchestrator pass that hands back to the
+        # Journalist (specialist dispatches stay bounded by max_agent_calls).
+        limit += 2 * max(0, int(rev.get("max_evidence_loops", 1)))
     if hitl.get("enabled", False):
         checkpoints = set(hitl.get("checkpoints", []))
         limit += ("post_plan" in checkpoints) + ("pre_journalist" in checkpoints)
@@ -546,6 +577,8 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
                 "journalist_instructions": instructions,
                 "agent_assignments": {},
                 "routing_reasoning": f"safety valve: {max_calls} specialist calls reached",
+                **({"review_route": "journalist", "reviewer_requests": []}
+                   if state.get("review_route") == "orchestrator" else {}),
                 "messages": [AIMessage(content=(
                     f"[Orchestrator safety valve: {max_calls} specialist calls reached. "
                     "Routing directly to Journalist.]"
@@ -555,6 +588,10 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
 
         findings, consulted_note = routing_context(state)
         rounds_done = state.get("specialist_rounds", 0)
+        # Only present after a reviewer rejection routed back here (reviewer.on_rejection).
+        requests_block = (
+            _reviewer_requests_block(state, specialist_set) if state.get("review_route") == "orchestrator" else ""
+        )
         # Empty unless orchestrator.allow_tools is on, so the default prompt is unchanged.
         checks_block = (
             f"YOUR QUICK CHECKS (your own tool results, gathered before this decision):\n{quick_checks}\n\n"
@@ -566,6 +603,7 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             f"{consulted_note}\n\n"
             f"FINDINGS COLLECTED SO FAR:\n{findings}\n\n"
             f"{checks_block}"
+            f"{requests_block}"
             f"ALL AVAILABLE SPECIALISTS: {', '.join(specialist_names)}\n\n"
             "Decide the next step:\n"
             "  • Route to one specialist for sequential deep investigation.\n"
@@ -632,7 +670,9 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
         }
 
         early_stopped = False
-        if early_stop and decision.sufficient_evidence:
+        # During a reviewer evidence round the reviewer has already judged the evidence
+        # insufficient, so a "sufficient" claim must not cancel the requested dispatches.
+        if early_stop and decision.sufficient_evidence and state.get("review_route") != "orchestrator":
             if rounds_done >= min_rounds:
                 if specialist_dispatches:
                     routing_notes.append(f"early stop: evidence judged sufficient after {rounds_done} round(s); "
@@ -674,6 +714,8 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             if early_stop and decision.coverage:
                 instructions += f"\n\nEVIDENCE COVERAGE (orchestrator's assessment):\n{decision.coverage}"
             update["journalist_instructions"] = instructions
+            if state.get("review_route") == "orchestrator":
+                update.update(review_route="journalist", reviewer_requests=[])   # evidence round done
         return update
 
     if not tools:
@@ -825,16 +867,21 @@ def make_on_rejection_node():
     """Pause after a rejection: REVISE (default), OVERRIDE, or custom revision instructions."""
 
     def on_rejection_node(state: GraphState):
-        feedback = state.get("next_instructions", "")
+        feedback = state.get("reviewer_feedback") or state.get("next_instructions", "")
+        to_orchestrator = state.get("review_route") == "orchestrator"
+        target = (
+            "the orchestrator, which gathers the missing evidence before the Journalist revises"
+            if to_orchestrator else "Journalist"
+        )
         answer = interrupt({
             "checkpoint": "on_rejection",
             "question": (
                 f"Reviewer-2 REJECTED the draft.\n\n"
                 f"Reasons:\n{feedback[:500]}\n\n"
                 "Options:\n"
-                "  REVISE   — send back to Journalist with reviewer feedback (default)\n"
+                f"  REVISE   — send back to {target} with reviewer feedback (default)\n"
                 "  OVERRIDE — force-approve this draft and end the run\n"
-                "  Or type your own revision instructions for the Journalist:"
+                f"  Or type your own revision instructions{'' if to_orchestrator else ' for the Journalist'}:"
             ),
             "default": "REVISE",
         })
@@ -848,6 +895,7 @@ def make_on_rejection_node():
         if answer and answer.upper() != "REVISE":
             return {
                 "next_instructions": answer,
+                "reviewer_feedback": answer,
                 "messages": [AIMessage(content="[HITL on_rejection]: custom revision instructions")],
             }
         return {"messages": [AIMessage(content="[HITL on_rejection]: REVISE")]}
@@ -961,7 +1009,8 @@ def make_journalist_node(config: dict, model, tools: list, summary_model=None):
         if state.get("revision_count", 0) > 0:
             sections.append(f"PREVIOUS DRAFT (rejected):\n{agent_outputs.get(journalist_name, '')}")
             sections.append(
-                f"REVISION INSTRUCTIONS FROM REVIEWER-2:\n{state.get('next_instructions', '')}\n"
+                f"REVISION INSTRUCTIONS FROM REVIEWER-2:\n"
+                f"{state.get('reviewer_feedback') or state.get('next_instructions', '')}\n"
                 "Address all reviewer feedback in this revised version."
             )
         sections.append(brief)
@@ -1000,21 +1049,91 @@ def make_journalist_node(config: dict, model, tools: list, summary_model=None):
 
 # ── Reviewer node ──────────────────────────────────────────────────────────
 
-def make_reviewer_node(config: dict, reviewer_model, hitl_cfg: dict = None):
+def make_reviewer_node(config: dict, reviewer_model, hitl_cfg: dict = None, specialist_names: list = None):
     """Adversarial reviewer.
 
     An empty draft is rejected without an LLM call. After max_revision_loops
-    rejections the next draft is force-approved, unless it is empty, in which
-    case the run ends with final_status "failed". The on_rejection checkpoint is
-    a separate node; ``hitl_cfg`` is accepted for backwards compatibility.
+    rejections the next draft is force-approved (reviewer.on_max_revisions:
+    flag, the default) or reviewed once more and the run fails if it is still
+    rejected (fail); an empty draft at that point always fails the run. The
+    on_rejection checkpoint is a separate node; ``hitl_cfg`` is accepted for
+    backwards compatibility.
+
+    With reviewer.on_rejection orchestrator or auto, the verdict is structured
+    (ReviewerVerdict) so that missing evidence can be sent back to the
+    orchestrator; an unparseable reply falls back to the APPROVED / REJECTED:
+    text protocol. The default (journalist) keeps the text protocol only.
     """
+    reviewer_cfg = config["reviewer"]
     reviewer_prompt = build_reviewer_prompt(config)
-    max_revisions = config["reviewer"].get("max_revision_loops", 3)
+    max_revisions = reviewer_cfg.get("max_revision_loops", 3)
     journalist_name = config["orchestrator"]["journalist"]
+    on_rejection = reviewer_cfg.get("on_rejection", "journalist")
+    max_evidence_loops = reviewer_cfg.get("max_evidence_loops", 1)
+    fail_at_max = reviewer_cfg.get("on_max_revisions", "flag") == "fail"
+    context = list(reviewer_cfg.get("context") or ["draft"])
+    excerpt_rows = reviewer_cfg.get("matrix_excerpt_rows", 50)
+    max_agent_calls = config["orchestrator"].get("max_agent_calls", 8)
+    specialists = list(specialist_names or [])
+    structured_model = None
+    if on_rejection != "journalist":
+        structured_model = reviewer_model.with_structured_output(ReviewerVerdict, include_raw=True)
+        structured_prompt = (
+            f"{reviewer_prompt}\n\n"
+            "Return your verdict as structured output: `verdict` is APPROVED or REJECTED; "
+            "`style_issues` lists problems the writer can fix alone; `missing_evidence` lists claims "
+            "that need more evidence from the research team, each with `claim`, `reason` and, if one "
+            f"fits, `suggested_agent` (one of: {', '.join(specialists) or 'none'})."
+        )
+
+    def review_input(state: GraphState, draft: str) -> str:
+        if [c for c in context if c != "draft"] == []:
+            return draft                     # default: the draft only, as before
+        sections = []
+        if "task" in context:
+            sections.append(f"RESEARCH TASK:\n{state.get('task', '')}")
+        sections.append(f"DRAFT TO REVIEW:\n{draft}")
+        if "matrix" in context:
+            sections.append(
+                f"TRACEABILITY MATRIX (up to {excerpt_rows} rows logged in this run). Check that the "
+                f"draft's cited claims are recorded here:\n{_matrix_excerpt(config, excerpt_rows)}"
+            )
+        return "\n\n".join(sections)
+
+    def judge(state: GraphState, draft: str) -> tuple:
+        """Return (approved, feedback_text, evidence_requests, token_usage)."""
+        human = HumanMessage(content=review_input(state, draft))
+        usage: dict = {}
+        if structured_model is not None:
+            parsed = None
+            try:
+                result = structured_model.invoke([SystemMessage(content=structured_prompt), human])
+                if isinstance(result, dict) and "parsed" in result:
+                    usage = _extract_token_usage(result.get("raw"))
+                    parsed = result["parsed"] if result.get("parsing_error") is None else None
+                    raw_text = _message_text(result.get("raw")).strip() if result.get("raw") is not None else ""
+                else:
+                    parsed, raw_text = result, ""
+            except GraphBubbleUp:
+                raise
+            except Exception:
+                parsed, raw_text = None, ""
+            if isinstance(parsed, ReviewerVerdict):
+                return (parsed.verdict == "APPROVED", _verdict_feedback(parsed),
+                        _evidence_requests(parsed, specialists), usage)
+            # A reply that ignored the schema but follows the text protocol needs no second call.
+            if _APPROVED_RE.match(raw_text) or raw_text.startswith("REJECTED"):
+                return bool(_APPROVED_RE.match(raw_text)), raw_text, [], usage
+        # Text protocol: today's behaviour, and the fallback for an unparseable structured reply.
+        response = reviewer_model.invoke([SystemMessage(content=reviewer_prompt), human])
+        usage = _merge_token_usage(usage, _extract_token_usage(response))
+        verdict = _message_text(response).strip()
+        return bool(_APPROVED_RE.match(verdict)), verdict, [], usage
 
     def reviewer_node(state: GraphState):
         revision_count = state.get("revision_count", 0)
         draft = state.get("agent_outputs", {}).get(journalist_name, "")
+        final_review = False
 
         if revision_count >= max_revisions:
             if not draft.strip():
@@ -1026,33 +1145,32 @@ def make_reviewer_node(config: dict, reviewer_model, hitl_cfg: dict = None):
                     ))],
                     "token_usage": {},
                 }
-            return {
-                "reviewer_approved": True,
-                "final_status": "force_approved",
-                "messages": [AIMessage(content=(
-                    f"[Reviewer-2 safety valve: {max_revisions} revision loops reached. "
-                    "Force-approved.]"
-                ))],
-                "token_usage": {},
-            }
+            if not fail_at_max:
+                return {
+                    "reviewer_approved": True,
+                    "final_status": "force_approved",
+                    "messages": [AIMessage(content=(
+                        f"[Reviewer-2 safety valve: {max_revisions} revision loops reached. "
+                        "Force-approved.]"
+                    ))],
+                    "token_usage": {},
+                }
+            final_review = True              # on_max_revisions: fail — read the last draft once more
 
         if not draft.strip():
             return {
                 "reviewer_approved": False,
                 "revision_count": revision_count + 1,
                 "next_instructions": EMPTY_DRAFT_FEEDBACK,
+                "reviewer_feedback": EMPTY_DRAFT_FEEDBACK,
+                "review_route": "journalist",
                 "messages": [AIMessage(content="[Reviewer-2 REJECTED]: empty draft")],
                 "token_usage": {},
             }
 
-        response = reviewer_model.invoke([
-            SystemMessage(content=reviewer_prompt),
-            HumanMessage(content=draft),
-        ])
-        usage = _extract_token_usage(response)
-        verdict = _message_text(response).strip()
+        approved, verdict, requests, usage = judge(state, draft)
 
-        if _APPROVED_RE.match(verdict):
+        if approved:
             return {
                 "reviewer_approved": True,
                 "final_status": "approved",
@@ -1060,15 +1178,96 @@ def make_reviewer_node(config: dict, reviewer_model, hitl_cfg: dict = None):
                 "token_usage": usage,
             }
 
-        return {
+        if final_review:
+            return {
+                "reviewer_approved": False,
+                "final_status": "failed",
+                "reviewer_feedback": verdict,
+                "messages": [AIMessage(content=(
+                    f"[Reviewer-2 REJECTED the final draft after {max_revisions} revision loops — "
+                    f"run failed (reviewer.on_max_revisions: fail)]: {verdict[:200]}…"
+                ))],
+                "token_usage": usage,
+            }
+
+        evidence_loops = state.get("evidence_loop_count", 0)
+        wants_evidence = on_rejection == "orchestrator" or (on_rejection == "auto" and bool(requests))
+        # With the specialist budget spent the orchestrator could only hand straight back.
+        wants_evidence = wants_evidence and state.get("agent_call_count", 0) < max_agent_calls
+        route = "orchestrator" if wants_evidence and evidence_loops < max_evidence_loops else "journalist"
+        update = {
             "reviewer_approved": False,
             "revision_count": revision_count + 1,
             "next_instructions": verdict,
+            "reviewer_feedback": verdict,
+            "reviewer_requests": requests,
+            "review_route": route,
             "messages": [AIMessage(content=f"[Reviewer-2 REJECTED]: {verdict[:200]}…")],
             "token_usage": usage,
         }
+        if route == "orchestrator":
+            update["evidence_loop_count"] = evidence_loops + 1
+            update["messages"] = [AIMessage(content=(
+                f"[Reviewer-2 REJECTED → orchestrator for more evidence]: {verdict[:200]}…"
+            ))]
+        return update
 
     return reviewer_node
+
+
+def _verdict_feedback(verdict: ReviewerVerdict) -> str:
+    """Render a structured rejection in the text form the Journalist and HITL prompt expect."""
+    if verdict.verdict == "APPROVED":
+        return "APPROVED"
+    lines = ["REJECTED:"]
+    lines += [f"- {issue}" for issue in verdict.style_issues]
+    lines += [f"- Missing evidence: {req.claim} ({req.reason})" for req in verdict.missing_evidence]
+    return "\n".join(lines) if len(lines) > 1 else "REJECTED: no reasons given."
+
+
+def _evidence_requests(verdict: ReviewerVerdict, specialists: list) -> list:
+    """EvidenceRequests as plain dicts; a suggested agent that is not a specialist is dropped."""
+    return [
+        {"claim": req.claim, "reason": req.reason,
+         "suggested_agent": req.suggested_agent if req.suggested_agent in specialists else None}
+        for req in verdict.missing_evidence
+    ]
+
+
+def _reviewer_requests_block(state: GraphState, specialist_set: set) -> str:
+    """The "REVIEWER REQUESTS" section of the routing prompt during an evidence round."""
+    lines = ["REVIEWER REQUESTS (Reviewer-2 rejected the draft and needs more evidence before the",
+             "Journalist revises it). Dispatch the specialists who can close these gaps, then route",
+             "to ['Journalist']:"]
+    for req in state.get("reviewer_requests") or []:
+        agent = req.get("suggested_agent")
+        hint = f" (suggested: {agent})" if agent in specialist_set else ""
+        lines.append(f"  • {req.get('claim', '')} — {req.get('reason', '')}{hint}")
+    feedback = state.get("reviewer_feedback", "")
+    if feedback:
+        lines.append(f"Reviewer feedback:\n{feedback[:1500]}")
+    return "\n".join(lines) + "\n\n"
+
+
+# Only "### Run" starts a run; "### Resumed run" continues one, so its earlier rows still count.
+_MATRIX_SECTION_RE = re.compile(r"^### Run\b")
+
+
+def _matrix_excerpt(config: dict, max_rows: int) -> str:
+    """Rows of the traceability matrix logged in the current run, newest last.
+
+    The run starts at the last "### Run" separator; "### Resumed run" separators
+    written by --resume are skipped over, so rows logged before a crash are kept.
+    """
+    path = resolve_swarm_path(config, "traceability_matrix")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return "(the traceability matrix could not be read)"
+    start = max((i for i, line in enumerate(lines) if _MATRIX_SECTION_RE.match(line)), default=-1)
+    rows = [line for line in lines[start + 1:]
+            if line.startswith("|") and not line.startswith(("| Source |", "|--"))]
+    return "\n".join(rows[-max_rows:]) if rows else "(no rows logged in this run)"
 
 
 # ── Graph builder ──────────────────────────────────────────────────────────
@@ -1171,7 +1370,8 @@ def build_graph(config: dict = None, checkpointer=_NO_CHECKPOINTER):
 
     # ── Register reviewer and HITL checkpoint nodes ──────────────────────
     if reviewer_enabled:
-        workflow.add_node("reviewer", make_reviewer_node(config, reviewer_model_inst))
+        workflow.add_node("reviewer", make_reviewer_node(config, reviewer_model_inst,
+                                                         specialist_names=specialist_names))
     if post_plan_on:
         workflow.add_node("hitl_post_plan", make_post_plan_node(config, specialist_names))
     if pre_journalist_on:
@@ -1197,6 +1397,9 @@ def build_graph(config: dict = None, checkpointer=_NO_CHECKPOINTER):
             return specialist_targets[0]
         # Anything else (including an empty or unknown target list) means the
         # evidence phase is over: the Journalist is the only way to finish a run.
+        # pre_journalist is asked once; a reviewer evidence round goes straight back.
+        if state.get("revision_count", 0) > 0:
+            return "Journalist"
         return to_journalist
 
     def orchestrator_router(state: GraphState):
@@ -1206,6 +1409,7 @@ def build_graph(config: dict = None, checkpointer=_NO_CHECKPOINTER):
 
     dispatch_map = {name: name for name in specialist_names}
     dispatch_map[to_journalist] = to_journalist
+    dispatch_map["Journalist"] = "Journalist"
     orchestrator_map = dict(dispatch_map)
     if post_plan_on:
         orchestrator_map["hitl_post_plan"] = "hitl_post_plan"
@@ -1216,22 +1420,27 @@ def build_graph(config: dict = None, checkpointer=_NO_CHECKPOINTER):
 
     if reviewer_enabled:
         workflow.add_edge("Journalist", "reviewer")
-        on_reject = "hitl_on_rejection" if on_rejection_on else "Journalist"
+        # reviewer.on_rejection orchestrator | auto can send a rejection back to the
+        # orchestrator for more evidence; the reviewer node decides (review_route).
+        evidence_route = config["reviewer"].get("on_rejection", "journalist") != "journalist"
+
+        def revise_target(state: GraphState) -> str:
+            return "orchestrator" if evidence_route and state.get("review_route") == "orchestrator" else "Journalist"
 
         def reviewer_router(state: GraphState) -> str:
             if state.get("reviewer_approved", False) or state.get("final_status") == "failed":
                 return END
-            return on_reject
+            return "hitl_on_rejection" if on_rejection_on else revise_target(state)
 
-        workflow.add_conditional_edges("reviewer", reviewer_router, {END: END, on_reject: on_reject})
+        revise_map = {"Journalist": "Journalist", **({"orchestrator": "orchestrator"} if evidence_route else {})}
+        reviewer_map = {END: END, **({"hitl_on_rejection": "hitl_on_rejection"} if on_rejection_on else revise_map)}
+        workflow.add_conditional_edges("reviewer", reviewer_router, reviewer_map)
 
         if on_rejection_on:
             def rejection_router(state: GraphState) -> str:
-                return END if state.get("reviewer_approved", False) else "Journalist"
+                return END if state.get("reviewer_approved", False) else revise_target(state)
 
-            workflow.add_conditional_edges(
-                "hitl_on_rejection", rejection_router, {END: END, "Journalist": "Journalist"},
-            )
+            workflow.add_conditional_edges("hitl_on_rejection", rejection_router, {END: END, **revise_map})
     else:
         workflow.add_edge("Journalist", END)
 
