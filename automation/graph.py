@@ -58,7 +58,9 @@ Failure handling
 Human-in-the-Loop (HITL)
 -------------------------
   When hitl.enabled = true in swarm_config.yml, the graph is compiled with a
-  MemorySaver checkpointer and each configured checkpoint is its own node:
+  checkpointer (MemorySaver by default; see the top-level `checkpointer` key for
+  a SQLite file that survives the process) and each configured checkpoint is its
+  own node:
 
     post_plan      — after the orchestrator's first routing decision
     pre_journalist — before the Journalist node (final framing chance)
@@ -95,6 +97,7 @@ from automation.config import (
     build_reviewer_prompt,
     create_model,
     create_reviewer_model,
+    get_checkpointer_config,
     get_hitl_config,
     get_persona_config,
     load_config,
@@ -997,13 +1000,17 @@ def make_reviewer_node(config: dict, reviewer_model, hitl_cfg: dict = None):
 
 # ── Graph builder ──────────────────────────────────────────────────────────
 
-def build_graph(config: dict = None):
+_NO_CHECKPOINTER = object()
+
+
+def build_graph(config: dict = None, checkpointer=_NO_CHECKPOINTER):
     """Build and compile the multi-agent supervisor LangGraph.
 
-    When hitl.enabled = true in swarm_config.yml, the graph is compiled with a
-    MemorySaver checkpointer and each configured checkpoint becomes its own node
-    so that interrupt() can pause execution and resume after the user responds.
-    When HITL is disabled, no checkpointer is used.
+    When hitl.enabled = true in swarm_config.yml, each configured checkpoint
+    becomes its own node so that interrupt() can pause execution and resume
+    after the user responds. ``checkpointer`` is the saver to compile with
+    (None for none); when omitted, a MemorySaver is used if HITL is on or
+    ``checkpointer.type`` is memory, and no checkpointer otherwise.
 
     All LLM model instances are created once here and closed over in node
     closures, eliminating repeated client instantiation during execution.
@@ -1156,8 +1163,19 @@ def build_graph(config: dict = None):
         workflow.add_edge("Journalist", END)
 
     # ── Compile with optional checkpointer for HITL interrupt/resume ─────
-    if hitl_on:
-        from langgraph.checkpoint.memory import MemorySaver
-        return workflow.compile(checkpointer=MemorySaver())
-
+    # main.py opens the configured checkpointer (see config.open_checkpointer) and
+    # passes it in; None means no checkpointer. Without the argument the previous
+    # behaviour applies: a MemorySaver when HITL is on, nothing otherwise.
+    if checkpointer is _NO_CHECKPOINTER:
+        if get_checkpointer_config(config)["type"] == "sqlite":
+            raise ValueError(
+                "checkpointer.type: sqlite must be opened inside the event loop; "
+                "pass build_graph(config, checkpointer=...) from config.open_checkpointer()."
+            )
+        checkpointer = None
+        if hitl_on or get_checkpointer_config(config)["type"] == "memory":
+            from langgraph.checkpoint.memory import MemorySaver
+            checkpointer = MemorySaver()
+    if checkpointer is not None:
+        return workflow.compile(checkpointer=checkpointer)
     return workflow.compile()

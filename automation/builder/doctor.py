@@ -12,9 +12,12 @@ from rich.table import Table
 from automation.config import (
     build_journalist_brief,
     findings_slug,
+    get_checkpointer_config,
     get_run_log_path,
     load_config,
     persona_model_config,
+    resolve_swarm_path,
+    sqlite_saver_class,
 )
 
 console = Console()
@@ -225,6 +228,34 @@ def _check_run_artefacts(report: SwarmDoctorReport, config: dict) -> None:
                 ))
 
 
+def _check_checkpointer(report: SwarmDoctorReport, config: dict) -> None:
+    """checkpointer: the sqlite saver needs the optional extra; memory alone cannot resume a crash."""
+    settings = get_checkpointer_config(config)
+    explicit = (config.get("checkpointer") or {}).get("type")
+    if settings["type"] == "sqlite":
+        try:
+            sqlite_saver_class()
+        except RuntimeError as e:
+            report.issues.append(ValidationIssue("error", str(e), "swarm_config.yml"))
+        if settings["path"].is_dir():
+            report.issues.append(ValidationIssue(
+                "error", f"checkpointer.path points to a directory ({settings['path']}); give a file path",
+                "swarm_config.yml",
+            ))
+        output_dir = resolve_swarm_path(config, "output_dir")
+        if output_dir == settings["path"] or output_dir in settings["path"].parents:
+            report.issues.append(ValidationIssue(
+                "warning", f"checkpointer.path is inside swarm.output_dir ({output_dir}); git_commit_snapshot "
+                "commits that folder, so the binary run state would be committed. Use ./.murmuration/",
+                "swarm_config.yml",
+            ))
+    elif explicit == "memory" and not (config.get("hitl") or {}).get("enabled"):
+        report.issues.append(ValidationIssue(
+            "warning", "checkpointer.type: memory without HITL keeps checkpoints only while the process "
+            "runs, so a crashed run cannot be resumed; use type: sqlite for --resume", "swarm_config.yml",
+        ))
+
+
 def _check_persona_models(report: SwarmDoctorReport, config: dict) -> None:
     """personas[].model: flag API keys missing from the shell (the base key is checked separately)."""
     base_key = (config.get("model") or {}).get("env_key", "OPENAI_API_KEY")
@@ -400,6 +431,7 @@ def inspect_swarm(root_dir: Path) -> SwarmDoctorReport:
     _check_journalist_brief(report, config)
     _check_run_artefacts(report, config)
     _check_persona_models(report, config)
+    _check_checkpointer(report, config)
     _check_traceability_coverage(
         report,
         personas,

@@ -33,6 +33,7 @@ import datetime
 import json
 import uuid
 from pathlib import Path
+from typing import Optional
 
 import typer
 from dotenv import load_dotenv
@@ -69,9 +70,11 @@ from automation.builder.wizard import (
 )
 from automation.config import (
     findings_slug,
+    get_checkpointer_config,
     get_hitl_config,
     get_run_log_path,
     load_config,
+    open_checkpointer,
     resolve_swarm_path,
     validate_env,
 )
@@ -207,7 +210,7 @@ MATRIX_HEADER = (
 
 # ── Helper functions ──────────────────────────────────────────────────────
 
-def _ensure_matrix_header(config: dict, task: str) -> None:
+def _ensure_matrix_header(config: dict, task: str, resumed_thread: str = "") -> None:
     """Create the traceability matrix with its table header if it does not exist,
     then append a run-separator line so each run's entries are clearly delimited."""
     matrix_path = resolve_swarm_path(config, "traceability_matrix")
@@ -217,8 +220,9 @@ def _ensure_matrix_header(config: dict, task: str) -> None:
 
     run_stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     task_preview = task[:80] + "…" if len(task) > 80 else task
+    label = f"Resumed run {resumed_thread}" if resumed_thread else "Run"
     with open(matrix_path, "a", encoding="utf-8") as f:
-        f.write(f"\n### Run: {run_stamp} | Task: {task_preview}\n\n")
+        f.write(f"\n### {label}: {run_stamp} | Task: {task_preview}\n\n")
 
 
 def _write_run_metrics(config: dict, task: str, token_usage: dict) -> None:
@@ -333,8 +337,8 @@ class _RunRecorder:
             self._disable(f"swarm.run_log {self.log_path}", e)
             self.log_path = None
 
-    def start(self, task: str) -> None:
-        self._write({"event": "run_start", "task": task})
+    def start(self, task: str, resumed: bool = False) -> None:
+        self._write({"event": "run_resume" if resumed else "run_start", "task": task})
 
     def hitl_answer(self, checkpoint: str, answer: str) -> None:
         # Attached to the checkpoint node's update, which is the first one after the resume.
@@ -412,7 +416,12 @@ def _handle_hitl_interrupt(interrupt_objs) -> str:
     return answer
 
 
-async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict) -> tuple[dict, str]:
+class ResumeError(ValueError):
+    """A saved run cannot be continued (unknown thread, or a configuration that no longer matches)."""
+
+
+async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict,
+                           resume: bool = False) -> tuple[dict, str]:
     """Async inner loop: streams the compiled graph and handles HITL interrupts.
 
     Returns (accumulated token_usage dict, final_status). final_status is the
@@ -420,6 +429,11 @@ async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict) -
     completed | failed, or "" if no node set one.
     Specialist and Journalist nodes are async (using _run_tool_loop_async) so
     multiple tool calls within a single agent turn run concurrently.
+
+    With ``resume`` the run continues the thread in ``run_config`` from its last
+    checkpoint instead of starting from ``prompt``: a pending HITL question is
+    asked again, otherwise the steps that had not finished are re-run. Steps that
+    finished before a crash are not repeated.
     """
     final_token_usage: dict = {}
     final_status = ""
@@ -441,8 +455,37 @@ async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict) -
         "token_usage": {},
     }
 
-    recorder = _RunRecorder(config, ((run_config or {}).get("configurable") or {}).get("thread_id", ""))
-    recorder.start(prompt)
+    thread_id = ((run_config or {}).get("configurable") or {}).get("thread_id", "")
+    if resume:
+        snapshot = await graph.aget_state(run_config)
+        if not snapshot.values:
+            raise ResumeError(f"No saved run found for thread '{thread_id}' in the configured checkpointer.")
+        missing = [name for name in snapshot.next if name not in graph.nodes]
+        if not snapshot.next and not snapshot.values.get("final_status"):
+            # Every finished run sets final_status; an empty `next` without one means the
+            # rebuilt graph has no route from where the run stopped.
+            missing = ["(a step the current configuration does not build)"]
+        if missing:
+            raise ResumeError(
+                f"Thread '{thread_id}' stopped before {missing}, which the current configuration does not "
+                "build (was swarm_config.yml edited, e.g. HITL turned off or a persona renamed?). "
+                "Resume with the configuration the run was started with."
+            )
+        prompt = snapshot.values.get("task", prompt)
+        final_token_usage = dict(snapshot.values.get("token_usage") or {})
+        final_status = snapshot.values.get("final_status", "") or ""
+        if not snapshot.next:
+            typer.secho(f"Thread {thread_id} has already finished; nothing to resume.", fg=typer.colors.YELLOW)
+            return final_token_usage, final_status
+        pending = [intr for task in snapshot.tasks for intr in (getattr(task, "interrupts", None) or ())]
+        current_input = None
+        if pending:
+            current_input = Command(resume=_handle_hitl_interrupt(pending))
+
+    recorder = _RunRecorder(config, thread_id)
+    recorder.start(prompt, resumed=resume)
+    if resume and current_input is not None:
+        recorder.hitl_answer(_interrupt_checkpoint(pending), current_input.resume)
 
     typer.secho("\n🧠 [SWARM ACTIVE] Streaming agent interactions...\n", fg=typer.colors.BLUE)
 
@@ -455,9 +498,14 @@ async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict) -
                 config=run_config,
                 stream_mode="updates",
             ):
+                meta = event.get("__metadata__")
+                if isinstance(meta, dict) and meta.get("cached"):
+                    # On resume, LangGraph replays the saved writes of steps that finished
+                    # before the crash; they are already in the checkpoint's totals.
+                    continue
                 # Accumulate token_usage from any node update that carries it
                 for node_name, update in event.items():
-                    if not isinstance(update, dict):
+                    if node_name.startswith("__") or not isinstance(update, dict):
                         continue
                     if "token_usage" in update:
                         for k, v in update["token_usage"].items():
@@ -480,6 +528,12 @@ async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict) -
 
             if not interrupted:
                 break  # Graph completed naturally
+        if resume:
+            final_state = await graph.aget_state(run_config)
+            if final_state.next:
+                raise ResumeError(f"The resumed run stopped before {list(final_state.next)} without finishing.")
+            # The checkpoint holds the whole run's total, including steps finished before the crash.
+            final_token_usage = dict(final_state.values.get("token_usage") or final_token_usage)
     except BaseException as e:  # Ctrl-C and cancellation are logged too
         recorder.end("interrupted" if isinstance(e, (KeyboardInterrupt, asyncio.CancelledError)) else "error",
                      final_token_usage, error=e)
@@ -498,8 +552,11 @@ def _interrupt_checkpoint(interrupt_objs) -> str:
     return checkpoint
 
 
-def _run_graph(config: dict, prompt: str) -> None:
+def _run_graph(config: dict, prompt: str, resume_thread: str | None = None) -> None:
     """Core graph execution shared by `execute` and `report` commands.
+
+    ``resume_thread`` continues a saved run (checkpointer.type: sqlite) instead
+    of starting one; ``prompt`` is then ignored in favour of the saved task.
 
     Delegates to _run_graph_async via asyncio.run so that specialist nodes
     can execute multiple tool calls concurrently within each agent turn.
@@ -514,13 +571,23 @@ def _run_graph(config: dict, prompt: str) -> None:
         typer.secho(f"ENV ERROR: {e}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
-    _ensure_matrix_header(config, prompt)
+    checkpointer_cfg = get_checkpointer_config(config)
+    if resume_thread and checkpointer_cfg["type"] != "sqlite":
+        typer.secho(
+            "RESUME ERROR: --resume needs a checkpointer that outlives the process. "
+            "Set `checkpointer: {type: sqlite}` in swarm_config.yml (and install the 'persist' extra).",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    if not resume_thread:
+        _ensure_matrix_header(config, prompt)
 
     hitl_cfg = get_hitl_config(config)
     hitl_enabled = hitl_cfg.get("enabled", False)
 
     # ── Pre-flight HITL: simple CLI confirm, no graph interrupt needed ───
-    if hitl_enabled and "pre_flight" in hitl_cfg.get("checkpoints", []):
+    if not resume_thread and hitl_enabled and "pre_flight" in hitl_cfg.get("checkpoints", []):
         typer.secho("\n⏸  HITL Pre-flight", fg=typer.colors.CYAN, bold=True)
         typer.secho(f"  Task: {prompt[:120]}", fg=typer.colors.WHITE)
         if not typer.confirm("  Proceed with this task?", default=True):
@@ -535,24 +602,50 @@ def _run_graph(config: dict, prompt: str) -> None:
             fg=typer.colors.CYAN,
         )
 
-    graph = build_graph(config)
-
-    # Thread config is required for MemorySaver interrupt/resume. The recursion
+    # A thread id is required whenever there is a checkpointer. The recursion
     # limit is derived from the configured safety valves so LangGraph's own step
     # guard can never fire before max_agent_calls / max_revision_loops do.
     run_config = {"recursion_limit": compute_recursion_limit(config)}
-    if hitl_enabled:
-        run_config["configurable"] = {"thread_id": str(uuid.uuid4())}
+    thread_id = resume_thread or (str(uuid.uuid4()) if checkpointer_cfg["type"] != "none" else "")
+    if thread_id:
+        run_config["configurable"] = {"thread_id": thread_id}
+        typer.secho(f"🧵 Thread: {thread_id}", fg=typer.colors.CYAN)
+    resume_hint = (
+        f"↻  Resume with: python -m automation.main execute --resume {thread_id}"
+        if checkpointer_cfg["type"] == "sqlite" else ""
+    )
+
+    async def _execute():
+        # The checkpointer (an aiosqlite connection for sqlite) must live in this event loop.
+        async with open_checkpointer(config) as saver:
+            graph = build_graph(config, checkpointer=saver)
+            task, finished = prompt, False
+            if resume_thread:
+                snapshot = await graph.aget_state(run_config)
+                task = (snapshot.values or {}).get("task", "")
+                finished = bool(snapshot.values) and not snapshot.next and bool(
+                    snapshot.values.get("final_status"))
+                if snapshot.values and not finished:
+                    _ensure_matrix_header(config, task, resumed_thread=resume_thread)
+            usage, status = await _run_graph_async(config, prompt, graph, run_config, resume=bool(resume_thread))
+            return usage, status, task, finished
 
     try:
-        final_token_usage, final_status = asyncio.run(
-            _run_graph_async(config, prompt, graph, run_config)
-        )
+        final_token_usage, final_status, prompt, already_finished = asyncio.run(_execute())
     except Exception as e:
         typer.secho(f"\nExecution Error: {e}", fg=typer.colors.RED)
         if get_run_log_path(config):
             typer.secho(f"🧾 Run log: {get_run_log_path(config)}", fg=typer.colors.CYAN)
+        if resume_hint and not isinstance(e, ResumeError):
+            typer.secho(resume_hint, fg=typer.colors.CYAN)
         raise typer.Exit(code=1)
+    except KeyboardInterrupt:
+        if resume_hint:
+            typer.secho(f"\nInterrupted. {resume_hint}", fg=typer.colors.CYAN)
+        raise
+
+    if already_finished:
+        return
 
     output_dir = resolve_swarm_path(config, "output_dir")
     _write_run_metrics(config, prompt, final_token_usage)
@@ -1284,7 +1377,13 @@ def tools_remove(
     typer.secho(f"Removed tool '{target_key}'.", fg=typer.colors.GREEN)
 
 @app.command()
-def execute(prompt: str, config_path: Path = typer.Option(None, "--config", help="Swarm configuration YAML")):
+def execute(
+    prompt: Optional[str] = typer.Argument(None, help="Research prompt (omit with --resume)."),
+    config_path: Path = typer.Option(None, "--config", help="Swarm configuration YAML"),
+    resume: Optional[str] = typer.Option(
+        None, "--resume", help="Continue a saved run by its thread id (needs checkpointer.type: sqlite).",
+    ),
+):
     """
     Execute an autonomous research task with the swarm.
 
@@ -1293,6 +1392,7 @@ def execute(prompt: str, config_path: Path = typer.Option(None, "--config", help
 
     Example:
         python -m automation.main execute "Review the literature on [your research question]."
+        python -m automation.main execute --resume 3f1c…   # continue a crashed or paused run
     """
     try:
         config = load_config(config_path) if config_path else load_config()
@@ -1300,13 +1400,29 @@ def execute(prompt: str, config_path: Path = typer.Option(None, "--config", help
         typer.secho(f"CONFIG ERROR: {e}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
-    _run_graph(config, prompt)
+    _run_graph(config, _prompt_or_resume(prompt, resume), resume_thread=resume)
+
+
+def _prompt_or_resume(prompt: Optional[str], resume: Optional[str]) -> str:
+    """A new run needs a prompt; a resumed run reads its task from the checkpoint."""
+    if resume:
+        if prompt:
+            typer.secho("Note: the prompt is ignored with --resume; the saved task is used.",
+                        fg=typer.colors.YELLOW)
+        return ""
+    if not prompt:
+        typer.secho("Give a research prompt, or --resume <thread_id>.", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    return prompt
 
 
 @app.command()
 def report(
-    prompt: str,
+    prompt: Optional[str] = typer.Argument(None, help="Research prompt (omit with --resume)."),
     config_path: Path = typer.Option(None, "--config", help="Swarm configuration YAML"),
+    resume: Optional[str] = typer.Option(
+        None, "--resume", help="Continue a saved run by its thread id (needs checkpointer.type: sqlite).",
+    ),
     mode: str = typer.Option(
         "narrative-review",
         "--mode", "-m",
@@ -1355,6 +1471,10 @@ def report(
         )
         raise typer.Exit(code=1)
 
+    prompt = _prompt_or_resume(prompt, resume)
+    if resume:
+        _run_graph(config, prompt, resume_thread=resume)
+        return
     typer.secho(f"📋 Report mode: {mode}", fg=typer.colors.CYAN)
     _run_graph(config, REPORT_MODES[mode] + prompt)
 

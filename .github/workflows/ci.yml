@@ -21,7 +21,7 @@ jobs:
           cache: pip
 
       - name: Install package with dev dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,persist]"
 
       - name: Lint with ruff
         run: ruff check .

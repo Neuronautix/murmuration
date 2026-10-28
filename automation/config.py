@@ -11,6 +11,7 @@ A user should NEVER need to edit this file. All customization flows
 through swarm_config.yml and agents/*/persona.md files.
 """
 
+import contextlib
 import importlib
 import os
 import re
@@ -75,10 +76,38 @@ def _validate_options(config: dict) -> None:
     if persist is not None and not isinstance(persist, bool):
         raise ValueError(f"swarm_config.yml: swarm.persist_findings must be true or false, not {persist!r}.")
 
+    _validate_checkpointer(config)
+
     for persona in config.get("personas") or []:
         if not isinstance(persona, dict):
             continue  # malformed entries are reported by doctor / fail in get_persona_config
         _validate_model_override(persona.get("model"), f"personas[{persona.get('name', '?')}].model")
+
+
+CHECKPOINTER_TYPES = ("none", "memory", "sqlite")
+
+
+def _validate_checkpointer(config: dict) -> None:
+    block = config.get("checkpointer")
+    if block is None:
+        return
+    if not isinstance(block, dict):
+        raise ValueError("swarm_config.yml: checkpointer must be a mapping such as {type: sqlite, path: ...}.")
+    kind = block.get("type")
+    if kind not in CHECKPOINTER_TYPES:
+        raise ValueError(
+            f"swarm_config.yml: checkpointer.type must be one of {', '.join(CHECKPOINTER_TYPES)}, not {kind!r}."
+        )
+    path = block.get("path")
+    if path is not None and not (isinstance(path, str) and path.strip()):
+        raise ValueError("swarm_config.yml: checkpointer.path must be a file path.")
+    if path is not None and kind != "sqlite":
+        raise ValueError("swarm_config.yml: checkpointer.path is only used with checkpointer.type: sqlite.")
+    if kind == "none" and (config.get("hitl") or {}).get("enabled"):
+        raise ValueError(
+            "swarm_config.yml: checkpointer.type: none cannot be used with hitl.enabled: true; "
+            "HITL checkpoints need a checkpointer to pause and resume (use memory or sqlite)."
+        )
 
 
 SUPPORTED_PROVIDERS = ("openai", "anthropic", "google")
@@ -430,6 +459,60 @@ def create_reviewer_model(config: dict) -> Any:
     merged_model_cfg = {**config["model"], **reviewer_model_overrides}
     reviewer_config = {**config, "model": merged_model_cfg}
     return create_model(reviewer_config)
+
+
+def get_checkpointer_config(config: dict) -> dict:
+    """Resolve the top-level ``checkpointer`` block to ``{"type", "path"}``.
+
+    Default: ``memory`` when HITL is on (interrupts need one), otherwise ``none``,
+    which is the behaviour before the key existed. ``sqlite`` persists every step
+    to ``path`` (default ``./.murmuration/checkpoints.sqlite``) so a crashed or
+    paused run can be resumed from another process with ``--resume``. The default
+    is deliberately outside ``output_dir``: git_commit_snapshot force-adds that
+    folder, and the database is binary and holds the full run state.
+    """
+    block = config.get("checkpointer") or {}
+    kind = block.get("type") or ("memory" if (config.get("hitl") or {}).get("enabled") else "none")
+    path = None
+    if kind == "sqlite":
+        raw = block.get("path")
+        path = _resolve_project_path(raw or DEFAULT_CHECKPOINT_PATH)
+    return {"type": kind, "path": path}
+
+
+DEFAULT_CHECKPOINT_PATH = "./.murmuration/checkpoints.sqlite"
+SQLITE_EXTRA_HINT = "pip install 'murmuration[persist]'  (installs langgraph-checkpoint-sqlite)"
+
+
+def sqlite_saver_class():
+    """Import the async SQLite saver from the optional ``persist`` extra."""
+    try:
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    except ImportError as e:
+        raise RuntimeError(
+            f"checkpointer.type: sqlite needs the optional 'persist' extra: {SQLITE_EXTRA_HINT}"
+        ) from e
+    return AsyncSqliteSaver
+
+
+@contextlib.asynccontextmanager
+async def open_checkpointer(config: dict):
+    """Yield the checkpointer configured by ``checkpointer`` (None for type none).
+
+    The SQLite saver holds an aiosqlite connection bound to the running event
+    loop, so it must be opened inside it, around graph compilation and the run.
+    """
+    settings = get_checkpointer_config(config)
+    if settings["type"] == "memory":
+        from langgraph.checkpoint.memory import MemorySaver
+        yield MemorySaver()
+    elif settings["type"] == "sqlite":
+        saver_class = sqlite_saver_class()
+        settings["path"].parent.mkdir(parents=True, exist_ok=True)
+        async with saver_class.from_conn_string(str(settings["path"])) as saver:
+            yield saver
+    else:
+        yield None
 
 
 def get_hitl_config(config: dict) -> dict:

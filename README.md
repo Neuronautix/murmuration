@@ -234,9 +234,23 @@ and `load_config()` reject invalid values and name the offending key.
 | `orchestrator.allow_tools` | `false` | When `true`, the orchestrator persona runs a bounded tool loop with its own `tools:` (at most `max_tool_rounds_per_agent` rounds, plus one summary call if it is still calling tools) before each routing decision except the safety-valve pass, and its short report is added to the routing prompt. Its tokens count towards the run's usage. When `false`, its tools are not loaded and `swarm doctor` warns that they are ignored. The toxicology, FAIR-NAMs and PIU examples set it to `true`. |
 | `orchestrator.max_parallel_agents` | `null` | Maximum number of specialists running their model and tool calls at the same time when the orchestrator dispatches several in parallel. The others wait; none is skipped, and `max_agent_calls` counts them as before. Use it to stay under provider rate limits. |
 | `personas[].model` | none | A `{provider, name, temperature, env_key}` block on any persona, orchestrator and Journalist included, merged over `model` the way `reviewer.model` is. Personas with the same merged spec share one client. `execute` checks that each persona's key is set. `env_key` only names the variable to check (the client reads its provider's standard variable); switching `provider` without `env_key` checks that provider's standard variable. The cost estimate still prices every token with `model.pricing`. |
+| `checkpointer` | `{type: none}`, or `{type: memory}` when HITL is on | Where the run state is saved after every step. `sqlite` (with optional `path`, default `./.murmuration/checkpoints.sqlite`, kept out of `output_dir` because `git_commit_snapshot` commits that folder) keeps it in a file so a run can be resumed from a new process; it needs `pip install 'murmuration[persist]'`. `none` cannot be combined with HITL. |
 
 If a run log or findings file cannot be written (locked file, full disk), the run continues
 and that output is switched off with a warning.
+
+### Resuming a run
+
+With `checkpointer: {type: sqlite}`, `execute` and `report` print a thread id when the run
+starts. If the run crashes, is stopped with Ctrl-C, or is left waiting at a HITL question,
+continue it with:
+
+```bash
+python -m automation.main execute --resume <thread_id>
+```
+
+Steps that finished before the crash are not re-run; the step that failed runs again. A
+pending HITL question is asked again. The saved task is used, so no prompt is needed.
 
 Every row the `append_traceability` tool writes to the traceability matrix names the
 persona that logged it in the Author/Agent column.

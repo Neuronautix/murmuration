@@ -1570,3 +1570,306 @@ def test_recursion_limit_ignores_max_parallel_agents():
     cfg = make_config()
     cfg["orchestrator"]["max_parallel_agents"] = 1
     assert compute_recursion_limit(cfg) == compute_recursion_limit(make_config())
+
+
+# ── 14. Persistent checkpointer and resume (R5) ────────────────────────────
+
+
+def _sqlite_cfg(tmp_path, **kwargs):
+    cfg = make_config(**kwargs)
+    cfg["orchestrator"]["on_agent_failure"] = "abort"
+    cfg["checkpointer"] = {"type": "sqlite", "path": str(tmp_path / "ckpt" / "run.sqlite")}
+    return cfg
+
+
+def _run_with_saver(cfg, chat, run_config, resume=False, reviewer=None):
+    """One "process": open the configured saver, build the graph on it, run or resume."""
+    from automation.config import open_checkpointer
+    from automation.main import _run_graph_async
+
+    async def go():
+        async with open_checkpointer(cfg) as saver:
+            with patch("automation.graph.create_model", return_value=chat), \
+                 patch("automation.graph.create_reviewer_model", return_value=reviewer or FakeReviewer()), \
+                 patch("automation.config.load_persona_content", return_value="persona"), \
+                 patch("automation.graph.load_tools_for_persona", return_value=[]):
+                graph = build_graph(cfg, checkpointer=saver)
+            return await _run_graph_async(cfg, "task", graph, run_config, resume=resume)
+    return asyncio.run(go())
+
+
+def test_crashed_run_resumes_from_sqlite_without_rerunning_finished_specialists(tmp_path):
+    """Acceptance test for R5: a run that raises midway resumes in a new "process" on the same thread."""
+    pytest.importorskip("langgraph.checkpoint.sqlite.aio")
+    cfg = _sqlite_cfg(tmp_path)
+    rc = {"configurable": {"thread_id": "crash-1"}}
+    first = FakeChat([decision(["A"]), decision(["B"]), decision(["Journalist"])], fail_for={"B"})
+    with pytest.raises(RuntimeError, match="simulated API failure in B"):
+        _run_with_saver(cfg, first, rc)
+    assert first.count("A") == 1 and len(first.router.calls) == 2
+
+    second = FakeChat([decision(["Journalist"])])          # a fresh process: new models, same file
+    usage, status = _run_with_saver(cfg, second, rc, resume=True)
+    assert status == "approved"
+    assert second.count("A") == 0                           # finished before the crash: not re-run
+    assert second.count("B") == 1 and second.count("Journalist") == 1
+    assert len(second.router.calls) == 1                    # only the routing step after B
+    assert "findings from A" in second.human("Journalist")  # A's findings came from the checkpoint
+    # The total covers both processes: 2 routing calls + A before the crash, the rest after it.
+    llm_calls = first.count("A") + len(first.router.calls) + len(second.calls) + len(second.router.calls)
+    assert usage["total_tokens"] == USAGE["total_tokens"] * llm_calls + 2
+
+
+def test_hitl_pause_resumes_in_a_new_process(tmp_path):
+    pytest.importorskip("langgraph.checkpoint.sqlite.aio")
+    from automation import main
+    cfg = _sqlite_cfg(tmp_path, hitl={"enabled": True, "checkpoints": ["post_plan"]})
+    rc = {"configurable": {"thread_id": "hitl-1"}}
+    with patch.object(main, "_handle_hitl_interrupt", side_effect=KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt):        # the user closes the terminal at the question
+            _run_with_saver(cfg, FakeChat([decision(["A"]), decision(["Journalist"])]), rc)
+    second = FakeChat([decision(["Journalist"])])
+    with patch.object(main, "_handle_hitl_interrupt", return_value="B") as ask:
+        _, status = _run_with_saver(cfg, second, rc, resume=True)
+    assert ask.call_args[0][0][0].value["checkpoint"] == "post_plan"
+    assert status == "approved"
+    assert [n for n, _ in second.calls] == ["B", "Journalist"]   # the plan the user typed on resume
+    assert len(second.router.calls) == 1
+
+
+def test_resuming_an_unknown_or_finished_thread(tmp_path):
+    pytest.importorskip("langgraph.checkpoint.sqlite.aio")
+    cfg = _sqlite_cfg(tmp_path)
+    with pytest.raises(ValueError, match="No saved run found for thread 'nope'"):
+        _run_with_saver(cfg, FakeChat([decision(["Journalist"])]), {"configurable": {"thread_id": "nope"}},
+                        resume=True)
+    rc = {"configurable": {"thread_id": "done"}}
+    _run_with_saver(cfg, FakeChat([decision(["Journalist"])]), rc)
+    again = FakeChat([decision(["Journalist"])])
+    _, status = _run_with_saver(cfg, again, rc, resume=True)
+    assert status == "approved" and again.calls == []
+
+
+def _write_cli_config(tmp_path, checkpointer):
+    import yaml
+    cfg = make_config()
+    cfg["swarm"].update({"output_dir": str(tmp_path / "out"), "traceability_matrix": str(tmp_path / "M.md")})
+    cfg["orchestrator"]["on_agent_failure"] = "abort"
+    if checkpointer:
+        cfg["checkpointer"] = checkpointer
+    path = tmp_path / "swarm_config.yml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    return path
+
+
+def test_execute_prints_the_thread_id_and_resume_continues_it(tmp_path, monkeypatch):
+    pytest.importorskip("langgraph.checkpoint.sqlite.aio")
+    import re
+
+    from typer.testing import CliRunner
+
+    from automation import main
+    monkeypatch.setenv("K", "x")
+    path = _write_cli_config(tmp_path, {"type": "sqlite", "path": str(tmp_path / "c.sqlite")})
+    chats = iter([FakeChat([decision(["A"]), decision(["Journalist"])], fail_for={"Journalist"}),
+                  FakeChat([decision(["Journalist"])])])
+
+    def fake_build(config, checkpointer=None):
+        with patch("automation.graph.create_model", return_value=next(chats)), \
+             patch("automation.graph.create_reviewer_model", return_value=FakeReviewer()), \
+             patch("automation.config.load_persona_content", return_value="persona"), \
+             patch("automation.graph.load_tools_for_persona", return_value=[]):
+            return build_graph(config, checkpointer=checkpointer)
+
+    runner = CliRunner()
+    with patch.object(main, "build_graph", side_effect=fake_build):
+        crashed = runner.invoke(main.app, ["execute", "task", "--config", str(path)])
+        assert crashed.exit_code == 1
+        thread = re.search(r"Thread: (\S+)", crashed.output).group(1)
+        assert f"execute --resume {thread}" in crashed.output
+        resumed = runner.invoke(main.app, ["execute", "--resume", thread, "--config", str(path)])
+    assert resumed.exit_code == 0, resumed.output
+    assert f"Thread: {thread}" in resumed.output and "Task complete" in resumed.output
+    assert f"### Resumed run {thread}" in (tmp_path / "M.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("checkpointer", [None, {"type": "memory"}])
+def test_resume_needs_a_sqlite_checkpointer(tmp_path, monkeypatch, checkpointer):
+    from typer.testing import CliRunner
+
+    from automation import main
+    monkeypatch.setenv("K", "x")
+    path = _write_cli_config(tmp_path, checkpointer)
+    result = CliRunner().invoke(main.app, ["execute", "--resume", "abc", "--config", str(path)])
+    assert result.exit_code == 1 and "--resume needs a checkpointer" in result.output
+
+
+def test_execute_without_prompt_or_resume_fails(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from automation import main
+    monkeypatch.setenv("K", "x")
+    result = CliRunner().invoke(main.app, ["execute", "--config", str(_write_cli_config(tmp_path, None))])
+    assert result.exit_code == 1 and "--resume <thread_id>" in result.output
+
+
+def test_default_checkpointer_is_unchanged():
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from automation.config import get_checkpointer_config
+    assert get_checkpointer_config(make_config()) == {"type": "none", "path": None}
+    hitl = make_config(hitl={"enabled": True, "checkpoints": ["post_plan"]})
+    assert get_checkpointer_config(hitl)["type"] == "memory"
+    chat = FakeChat([decision(["Journalist"])])
+    assert build(make_config(), chat).checkpointer is None
+    assert isinstance(build(hitl, chat).checkpointer, MemorySaver)
+    memory = make_config()
+    memory["checkpointer"] = {"type": "memory"}
+    assert isinstance(build(memory, chat).checkpointer, MemorySaver)
+
+
+def test_sqlite_checkpointer_must_be_opened_by_the_caller(tmp_path):
+    cfg = _sqlite_cfg(tmp_path)
+    with pytest.raises(ValueError, match="checkpointer.type: sqlite must be opened inside the event loop"):
+        build(cfg, FakeChat([decision(["Journalist"])]))
+    from automation.config import get_checkpointer_config
+    default_path = get_checkpointer_config({**cfg, "checkpointer": {"type": "sqlite"}})["path"]
+    assert default_path.name == "checkpoints.sqlite"
+
+
+def test_missing_persist_extra_names_it(tmp_path, monkeypatch):
+    import sys
+
+    from automation.config import open_checkpointer
+    monkeypatch.setitem(sys.modules, "langgraph.checkpoint.sqlite.aio", None)
+
+    async def go():
+        async with open_checkpointer(_sqlite_cfg(tmp_path)):
+            pass
+    with pytest.raises(RuntimeError, match=r"murmuration\[persist\]"):
+        asyncio.run(go())
+
+
+@pytest.mark.parametrize("block, hitl, message", [
+    ("sqlite", False, "checkpointer must be a mapping"),
+    ({"type": "redis"}, False, "checkpointer.type must be one of"),
+    ({"type": "sqlite", "path": ""}, False, "checkpointer.path must be a file path"),
+    ({"type": "memory", "path": "x.sqlite"}, False, "checkpointer.path is only used with"),
+    ({"type": "none"}, True, "checkpointer.type: none cannot be used with hitl.enabled"),
+])
+def test_load_config_rejects_bad_checkpointer(tmp_path, block, hitl, message):
+    import yaml
+
+    from automation.config import CONFIG_PATH, load_config
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["checkpointer"] = block
+    real["hitl"]["enabled"] = hitl
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        load_config(tmp_path / "swarm_config.yml")
+
+
+def test_doctor_checks_the_checkpointer(tmp_path, monkeypatch):
+    import sys
+
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+
+    def issues(block):
+        real["checkpointer"] = block
+        (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+        return [(i.severity, i.message) for i in inspect_swarm(tmp_path).issues if "checkpointer" in i.message]
+
+    assert any(s == "warning" and "cannot be resumed" in m for s, m in issues({"type": "memory"}))
+    assert any(s == "error" and "points to a directory" in m
+               for s, m in issues({"type": "sqlite", "path": str(tmp_path)}))
+    monkeypatch.setitem(sys.modules, "langgraph.checkpoint.sqlite.aio", None)
+    assert any(s == "error" and "persist" in m for s, m in issues({"type": "sqlite"}))
+
+
+def test_parallel_crash_resume_reruns_only_the_failed_branch_and_logs_no_replays(tmp_path):
+    pytest.importorskip("langgraph.checkpoint.sqlite.aio")
+    names = ("A", "B", "C")
+    cfg = _sqlite_cfg(tmp_path, specialists=names)
+    cfg["swarm"]["run_log"] = str(tmp_path / "run.jsonl")
+    rc = {"configurable": {"thread_id": "fan-1"}}
+    plan = decision(list(names), assignments={n: n for n in names})
+    first = FakeChat([plan, decision(["Journalist"])], fail_for={"B"})
+    with pytest.raises(RuntimeError, match="simulated API failure in B"):
+        _run_with_saver(cfg, first, rc)
+    second = FakeChat([decision(["Journalist"])])
+    usage, status = _run_with_saver(cfg, second, rc, resume=True)
+    assert status == "approved" and [n for n, _ in second.calls] == ["B", "Journalist"]
+    lines = _read_jsonl(tmp_path / "run.jsonl")
+    after = lines[[line["event"] for line in lines].index("run_resume"):]
+    nodes = [line["node"] for line in after if line["event"] == "node"]
+    assert nodes == ["B", "orchestrator", "Journalist", "reviewer"]     # A and C are not replayed
+    assert after[-1]["token_usage"] == usage
+
+
+def test_resume_with_a_config_that_no_longer_builds_the_saved_step_fails_clearly(tmp_path):
+    pytest.importorskip("langgraph.checkpoint.sqlite.aio")
+    from automation import main
+    cfg = _sqlite_cfg(tmp_path, hitl={"enabled": True, "checkpoints": ["post_plan"]})
+    rc = {"configurable": {"thread_id": "edited"}}
+    with patch.object(main, "_handle_hitl_interrupt", side_effect=KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt):
+            _run_with_saver(cfg, FakeChat([decision(["A"])]), rc)
+    cfg["hitl"] = {"enabled": False, "checkpoints": []}
+    with pytest.raises(main.ResumeError, match="does not build"):
+        _run_with_saver(cfg, FakeChat([decision(["Journalist"])]), rc, resume=True)
+
+
+def test_cli_resume_keeps_the_saved_task_and_unknown_threads_have_no_side_effects(tmp_path, monkeypatch):
+    pytest.importorskip("langgraph.checkpoint.sqlite.aio")
+    import json
+    import re
+
+    from typer.testing import CliRunner
+
+    from automation import main
+    monkeypatch.setenv("K", "x")
+    path = _write_cli_config(tmp_path, {"type": "sqlite", "path": str(tmp_path / "c.sqlite")})
+    chats = iter([FakeChat([decision(["Journalist"])], fail_for={"Journalist"}),
+                  FakeChat([decision(["Journalist"])]), FakeChat([decision(["Journalist"])])])
+
+    def fake_build(config, checkpointer=None):
+        with patch("automation.graph.create_model", return_value=next(chats)), \
+             patch("automation.graph.create_reviewer_model", return_value=FakeReviewer()), \
+             patch("automation.config.load_persona_content", return_value="persona"), \
+             patch("automation.graph.load_tools_for_persona", return_value=[]):
+            return build_graph(config, checkpointer=checkpointer)
+
+    runner = CliRunner()
+    with patch.object(main, "build_graph", side_effect=fake_build):
+        crashed = runner.invoke(main.app, ["execute", "the saved task", "--config", str(path)])
+        thread = re.search(r"Thread: (\S+)", crashed.output).group(1)
+        matrix_before = (tmp_path / "M.md").read_text(encoding="utf-8")
+        unknown = runner.invoke(main.app, ["execute", "--resume", "no-such-thread", "--config", str(path)])
+        assert unknown.exit_code == 1 and "No saved run found" in unknown.output
+        assert "--resume no-such-thread" not in unknown.output
+        assert (tmp_path / "M.md").read_text(encoding="utf-8") == matrix_before
+        resumed = runner.invoke(main.app, ["execute", "--resume", thread, "--config", str(path)])
+    assert resumed.exit_code == 0, resumed.output
+    metrics = json.loads((tmp_path / "out" / "run_metrics.json").read_text(encoding="utf-8"))
+    assert metrics["task"] == "the saved task"
+    assert f"### Resumed run {thread}" in (tmp_path / "M.md").read_text(encoding="utf-8")
+    assert "Task: the saved task" in (tmp_path / "M.md").read_text(encoding="utf-8").split("Resumed run")[1]
+
+
+def test_default_sqlite_path_is_outside_output_dir_and_doctor_warns_otherwise(tmp_path):
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH, get_checkpointer_config, resolve_swarm_path
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["checkpointer"] = {"type": "sqlite"}
+    path = get_checkpointer_config(real)["path"]
+    assert path.parent.name == ".murmuration"
+    assert resolve_swarm_path(real, "output_dir") not in path.parents
+    real["checkpointer"]["path"] = "./Drafts/state.sqlite"
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    assert any("inside swarm.output_dir" in i.message for i in inspect_swarm(tmp_path).issues)

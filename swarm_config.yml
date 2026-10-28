@@ -335,6 +335,21 @@ hitl:
     - pre_journalist
     - on_rejection
 
+# ── Checkpointer (crash and HITL resume) ─────────────
+# Where LangGraph saves the run state after every step.
+#   none    — nothing is saved (default when HITL is off)
+#   memory  — kept in memory while the process runs (default when HITL is on)
+#   sqlite  — saved to a file, so a run that crashed, was stopped with Ctrl-C, or is
+#             waiting at a HITL question can be continued later from a new process:
+#               python -m automation.main execute --resume <thread_id>
+#             The thread id is printed when the run starts. Needs the optional extra:
+#               pip install 'murmuration[persist]'
+#             path defaults to ./.murmuration/checkpoints.sqlite. Keep it out of
+#             output_dir: git_commit_snapshot commits that folder.
+# checkpointer:
+#   type: sqlite
+#   path: "./.murmuration/checkpoints.sqlite"
+
 # ── Epistemic Tags ───────────────────────────────────
 # Tags used to classify knowledge claims in the traceability matrix.
 # Customize these to fit your domain's epistemology.
