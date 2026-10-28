@@ -223,14 +223,25 @@ def _citation_text(source: str) -> str:
     return "".join(result)
 
 
+def _citation_urls(source: str) -> list[str]:
+    """Trim prose punctuation consistently, retaining balanced destination parentheses."""
+    urls = []
+    for url in re.findall(r"https?://[^\s<>|]+", source):
+        url = url.rstrip(".,;")
+        while url.endswith(")") and url.count(")") > url.count("("):
+            url = url[:-1].rstrip(".,;")
+        urls.append(url)
+    return urls
+
+
 def _report_citations(source: str) -> list[dict]:
     """Read each directly cited identifier independently; proximity is not an alias binding."""
     source = _citation_text(source)
     records = [{"doi": normalize_doi(doi.rstrip(".,;"))} for doi in DOI.findall(source)]
     records.extend({"pmid": str(int(pmid))} for pmid in PMID.findall(source))
-    for url in re.findall(r"https?://[^\s<>|]+", source):
+    for url in _citation_urls(source):
         if not DOI.search(url) and not PMID.search(url):
-            records.append({"url": url.rstrip(".,;")})
+            records.append({"url": url})
     return list({canonical(record): record for record in records}.values())
 
 
@@ -244,9 +255,9 @@ def _citation(source: str) -> dict:
         record["doi"] = normalize_doi(doi[0].rstrip(".,;"))
     if pmid:
         record["pmid"] = str(int(pmid[1]))
-    url = re.search(r"https?://[^\s<>|]+", source)
-    if url and not record:
-        record["url"] = url[0].rstrip(".,;)")
+    urls = _citation_urls(source)
+    if urls and not record:
+        record["url"] = urls[0]
     if not record:
         raise ValueError("no explicit DOI, PMID or source URL")
     return record

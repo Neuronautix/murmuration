@@ -9,6 +9,7 @@ from automation.exporters.oratlas import (
     _citation,
     _deduplicate,
     _merge_citation,
+    _report_citations,
     canonical,
     check_export,
     export_oratlas,
@@ -201,3 +202,22 @@ def test_report_can_cite_multiple_works_with_separate_matrix_rows(tmp_path, sour
 ])
 def test_doi_suffix_parentheses_are_not_stripped(source):
     assert _citation(source) == {"doi": "10.1038/example(outer(inner))"}
+
+
+@pytest.mark.parametrize("url", ["https://example.org/paper", "https://example.org/paper(part)",
+                                 "https://example.org/paper(outer(inner))"])
+@pytest.mark.parametrize("wrapper", ["({url})", "(({url})).", "[Paper]({url})", "{url};"])
+def test_url_punctuation_matches_in_both_parsers_and_export(tmp_path, url, wrapper):
+    source = wrapper.format(url=url)
+    assert _citation(source) == {"url": url}
+    assert _report_citations(source) == [{"url": url}]
+    (tmp_path / "final_report.md").write_text(
+        f"## Results\n| claim | sources |\n|---|---|\n| A result | {source} |\n", encoding="utf-8",
+    )
+    (tmp_path / "traceability.md").write_text(
+        f"| claim | source |\n|---|---|\n| A result | {url} |\n", encoding="utf-8",
+    )
+    result = export_oratlas(tmp_path, tmp_path / "out", **OPTIONS)
+    assert result == {"counts": {"claims": 1, "citations": 1, "relations": 1}, "skipped": []}
+    citation = json.loads((tmp_path / "out/knowledge/oratlas/citations.jsonl").read_text())
+    assert citation["url"] == url
