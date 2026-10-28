@@ -9,6 +9,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- HITL checkpoints work on Python 3.10: `interrupt()` is now called inside the node's own config context, which LangGraph only sets automatically on 3.11+.
+- A specialist that fails between two successful dispatches keeps its earlier findings; only the failure note is dropped.
+- The traceability-matrix run separator records the thread id of checkpointed runs, and the reviewer's matrix excerpt (`reviewer.context: matrix`) follows that thread across resumes instead of taking whichever run wrote last.
 - **Orchestration quick wins** (see `docs/dev/ORCHESTRATION_AUDIT.md`, findings B1, B3, B6–B10, B12, R4, R7, R8, R11–R15):
   - An orchestrator decision of `['END']` no longer crashes the run with a `KeyError`; it routes to the Journalist, which is the only way a run can finish.
   - Per-agent assignments are replaced on every orchestrator pass instead of merged forever, so a stale instruction from an earlier round can no longer shadow new ones.

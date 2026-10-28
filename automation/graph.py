@@ -82,7 +82,7 @@ from typing import Annotated, Literal, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_core.runnables.config import run_in_executor
+from langchain_core.runnables.config import run_in_executor, set_config_context
 from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -415,9 +415,13 @@ def _combine_findings(persona_name: str, previous: str, new: str) -> str:
 
     Newest-first keeps the latest round visible when the orchestrator and peers
     read a truncated view; the Journalist reads the full text. A previous
-    failure note is dropped once the agent has produced something new.
+    failure note is dropped once the agent has produced something new, but the
+    successful rounds folded beneath it are kept.
     """
-    if not previous or previous.startswith(FAILED_PREFIX):
+    if previous.startswith(FAILED_PREFIX):
+        marker = f"\n\n[Earlier findings from {persona_name}]\n"
+        previous = previous.split(marker, 1)[1] if marker in previous else ""
+    if not previous:
         return new
     return f"{new}\n\n[Earlier findings from {persona_name}]\n{previous}"
 
@@ -554,6 +558,20 @@ def _unpack_routing_result(result) -> tuple:
             )
         return result["parsed"], _extract_token_usage(result.get("raw"))
     return result, _extract_token_usage(result)
+
+
+def _ask(value: dict, config: RunnableConfig | None):
+    """interrupt() inside the node's own config context.
+
+    interrupt() reads the run config from a context variable. LangGraph sets it
+    for nodes on Python 3.11+, but not on 3.10, where a bare interrupt() raises
+    "Called get_config outside of a runnable context". Node functions receive
+    the config as an argument, so it is set here explicitly.
+    """
+    if config is None:
+        return interrupt(value)
+    with set_config_context(config) as ctx:
+        return ctx.run(interrupt, value)
 
 
 def _parse_plan_override(answer: str, known_names: list) -> tuple:
@@ -934,9 +952,9 @@ def make_post_plan_node(config: dict, specialist_names: list):
     journalist_name = config["orchestrator"]["journalist"]
     specialist_set = set(specialist_names)
 
-    def post_plan_node(state: GraphState):
+    def post_plan_node(state: GraphState, config: RunnableConfig = None):
         plan = list(state.get("next_agents", []))
-        answer = interrupt({
+        answer = _ask({
             "checkpoint": "post_plan",
             "question": (
                 f"Orchestrator's routing plan:\n"
@@ -946,7 +964,7 @@ def make_post_plan_node(config: dict, specialist_names: list):
                 "or any other text to pass on as redirect instructions:"
             ),
             "default": "APPROVE",
-        })
+        }, config)
         answer = (answer or "APPROVE").strip()
         update = {"plan_reviewed": True}
         if not answer or answer.upper() == "APPROVE":
@@ -993,8 +1011,8 @@ def make_post_plan_node(config: dict, specialist_names: list):
 def make_pre_journalist_node():
     """Pause before the Journalist writes so the user can add framing instructions."""
 
-    def pre_journalist_node(state: GraphState):
-        answer = interrupt({
+    def pre_journalist_node(state: GraphState, config: RunnableConfig = None):
+        answer = _ask({
             "checkpoint": "pre_journalist",
             "question": (
                 "The swarm is ready to write the final report.\n\n"
@@ -1002,7 +1020,7 @@ def make_pre_journalist_node():
                 "(audience, length, emphasis), or press Enter to continue:"
             ),
             "default": "",
-        })
+        }, config)
         framing = (answer or "").strip()
         if not framing:
             return {"messages": [AIMessage(content="[HITL pre_journalist]: no extra framing")]}
@@ -1017,14 +1035,14 @@ def make_pre_journalist_node():
 def make_on_rejection_node():
     """Pause after a rejection: REVISE (default), OVERRIDE, or custom revision instructions."""
 
-    def on_rejection_node(state: GraphState):
+    def on_rejection_node(state: GraphState, config: RunnableConfig = None):
         feedback = state.get("reviewer_feedback") or state.get("next_instructions", "")
         to_orchestrator = state.get("review_route") == "orchestrator"
         target = (
             "the orchestrator, which gathers the missing evidence before the Journalist revises"
             if to_orchestrator else "Journalist"
         )
-        answer = interrupt({
+        answer = _ask({
             "checkpoint": "on_rejection",
             "question": (
                 f"Reviewer-2 REJECTED the draft.\n\n"
@@ -1035,7 +1053,7 @@ def make_on_rejection_node():
                 f"  Or type your own revision instructions{'' if to_orchestrator else ' for the Journalist'}:"
             ),
             "default": "REVISE",
-        })
+        }, config)
         answer = (answer or "REVISE").strip()
         if answer.upper() == "OVERRIDE":
             return {
@@ -1340,7 +1358,7 @@ def make_reviewer_node(config: dict, reviewer_model, hitl_cfg: dict = None, spec
             f"fits, `suggested_agent` (one of: {', '.join(specialists) or 'none'})."
         )
 
-    def review_input(state: GraphState, draft: str) -> str:
+    def review_input(state: GraphState, draft: str, thread_id: str = "") -> str:
         if [c for c in context if c != "draft"] == []:
             return draft                     # default: the draft only, as before
         sections = []
@@ -1350,15 +1368,15 @@ def make_reviewer_node(config: dict, reviewer_model, hitl_cfg: dict = None, spec
         if "matrix" in context:
             sections.append(
                 f"TRACEABILITY MATRIX (up to {excerpt_rows} rows logged in this run). Check that the "
-                f"draft's cited claims are recorded here:\n{_matrix_excerpt(config, excerpt_rows)}"
+                f"draft's cited claims are recorded here:\n{_matrix_excerpt(config, excerpt_rows, thread_id)}"
             )
         if check_claim_ids:
             sections.append(_claim_id_check(draft, state.get("claims") or {}, specialist_slugs))
         return "\n\n".join(sections)
 
-    def judge(state: GraphState, draft: str) -> tuple:
+    def judge(state: GraphState, draft: str, thread_id: str = "") -> tuple:
         """Return (approved, feedback_text, evidence_requests, token_usage)."""
-        human = HumanMessage(content=review_input(state, draft))
+        human = HumanMessage(content=review_input(state, draft, thread_id))
         usage: dict = {}
         if structured_model is not None:
             parsed = None
@@ -1386,7 +1404,8 @@ def make_reviewer_node(config: dict, reviewer_model, hitl_cfg: dict = None, spec
         verdict = _message_text(response).strip()
         return bool(_APPROVED_RE.match(verdict)), verdict, [], usage
 
-    def reviewer_node(state: GraphState):
+    def reviewer_node(state: GraphState, config: RunnableConfig = None):
+        thread_id = str(((config or {}).get("configurable") or {}).get("thread_id") or "")
         revision_count = state.get("revision_count", 0)
         draft = state.get("agent_outputs", {}).get(journalist_name, "")
         final_review = False
@@ -1424,7 +1443,7 @@ def make_reviewer_node(config: dict, reviewer_model, hitl_cfg: dict = None, spec
                 "token_usage": {},
             }
 
-        approved, verdict, requests, usage = judge(state, draft)
+        approved, verdict, requests, usage = judge(state, draft, thread_id)
 
         if approved:
             return {
@@ -1532,20 +1551,39 @@ def _claim_id_check(draft: str, claims: dict, slugs: set) -> str:
 _MATRIX_SECTION_RE = re.compile(r"^### Run\b")
 
 
-def _matrix_excerpt(config: dict, max_rows: int) -> str:
+def _is_matrix_row(line: str) -> bool:
+    return line.startswith("|") and not line.startswith(("| Source |", "|--"))
+
+
+def _matrix_excerpt(config: dict, max_rows: int, thread_id: str = "") -> str:
     """Rows of the traceability matrix logged in the current run, newest last.
 
-    The run starts at the last "### Run" separator; "### Resumed run" separators
-    written by --resume are skipped over, so rows logged before a crash are kept.
+    With a thread id (a checkpointed run), the rows are those of every section
+    that belongs to that thread: its "### Run: … | Thread: <id> |" section and
+    any "### Resumed run <id>:" sections, even if other runs wrote sections in
+    between. Otherwise (or for a matrix written before thread ids were
+    recorded) the run starts at the last "### Run" separator, and "### Resumed
+    run" separators are skipped over, so rows logged before a crash are kept.
     """
     path = resolve_swarm_path(config, "traceability_matrix")
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
         return "(the traceability matrix could not be read)"
-    start = max((i for i, line in enumerate(lines) if _MATRIX_SECTION_RE.match(line)), default=-1)
-    rows = [line for line in lines[start + 1:]
-            if line.startswith("|") and not line.startswith(("| Source |", "|--"))]
+    rows = []
+    if thread_id:
+        own = (f"| Thread: {thread_id} |", f"### Resumed run {thread_id}:")
+        in_thread = False
+        for line in lines:
+            if line.startswith("### "):
+                in_thread = own[1] in line or (line.startswith("### Run") and own[0] in line)
+            elif in_thread and _is_matrix_row(line):
+                rows.append(line)
+        if not any(own[0] in line for line in lines):
+            rows = []                   # matrix predates thread ids: use the last run below
+    if not rows:
+        start = max((i for i, line in enumerate(lines) if _MATRIX_SECTION_RE.match(line)), default=-1)
+        rows = [line for line in lines[start + 1:] if _is_matrix_row(line)]
     return "\n".join(rows[-max_rows:]) if rows else "(no rows logged in this run)"
 
 

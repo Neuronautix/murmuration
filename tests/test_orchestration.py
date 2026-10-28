@@ -2464,3 +2464,67 @@ def test_structured_findings_call_is_inside_the_parallel_limit(tmp_path):
                         {"A": [a_report()], "B": [report("b")]})
     run(build(cfg, chat))
     assert chat.peak == 1
+
+
+# ── 18. PR review follow-ups ───────────────────────────────────────────────
+
+
+def test_failure_note_is_dropped_but_earlier_successful_rounds_are_kept():
+    from automation.graph import FAILED_PREFIX, _combine_findings
+    after_failure = _combine_findings("A", "r1", f"{FAILED_PREFIX} A: boom")
+    assert _combine_findings("A", after_failure, "r3") == "r3\n\n[Earlier findings from A]\nr1"
+
+
+def test_specialist_that_fails_between_successes_keeps_its_first_round():
+    class FailSecond(FakeChat):
+        async def ainvoke(self, msgs, _bound=False, **kwargs):
+            if self.persona(msgs) == "A" and self.count("A") == 1:
+                self.calls.append(("A", msgs))
+                raise RuntimeError("rate limited")
+            return await super().ainvoke(msgs, _bound=_bound)
+
+    chat = FailSecond([decision(["A"]), decision(["A"]), decision(["A"]), decision(["Journalist"])])
+    state = run(build(make_config(), chat))
+    assert "findings from A #1" in state["agent_outputs"]["A"]
+    assert "AGENT FAILED" not in state["agent_outputs"]["A"]
+
+
+def test_matrix_excerpt_follows_the_resumed_thread_not_the_latest_run(tmp_path):
+    from automation.graph import _matrix_excerpt
+    matrix = tmp_path / "M.md"
+    matrix.write_text(MATRIX_HEADER
+                      + "\n### Run: 10:00 | Thread: run-a | Task: a\n\n| *s* | **A** | A before crash | m | **[FACT]** |\n"
+                      + "\n### Run: 10:05 | Thread: run-b | Task: b\n\n| *s* | **B** | B's evidence | m | **[FACT]** |\n"
+                      + "\n### Resumed run run-a: 10:10 | Task: a\n\n| *s* | **A** | A after resume | m | **[FACT]** |\n",
+                      encoding="utf-8")
+    cfg = {"swarm": {"traceability_matrix": str(matrix)}}
+    excerpt = _matrix_excerpt(cfg, 50, "run-a")
+    assert "A before crash" in excerpt and "A after resume" in excerpt and "B's evidence" not in excerpt
+    assert "B's evidence" in _matrix_excerpt(cfg, 50, "run-b") and "A after" not in _matrix_excerpt(cfg, 50, "run-b")
+    # Without a thread id: the last run section, as before.
+    assert "B's evidence" in _matrix_excerpt(cfg, 50) and "A before crash" not in _matrix_excerpt(cfg, 50)
+
+
+def test_run_separator_records_the_thread_id(tmp_path):
+    from automation.main import _ensure_matrix_header
+    cfg = {"swarm": {"traceability_matrix": str(tmp_path / "M.md")}}
+    _ensure_matrix_header(cfg, "task one", thread_id="t-1")
+    _ensure_matrix_header(cfg, "task two")
+    text = (tmp_path / "M.md").read_text(encoding="utf-8")
+    assert "| Thread: t-1 | Task: task one" in text
+    assert [line for line in text.splitlines() if line.startswith("### Run")][1].endswith("| Task: task two")
+
+
+def test_reviewer_reads_its_own_threads_matrix_rows(tmp_path):
+    matrix = tmp_path / "M.md"
+    matrix.write_text(MATRIX_HEADER
+                      + "\n### Run: 10:00 | Thread: mine | Task: t\n\n| *s* | **A** | my row | m | **[FACT]** |\n"
+                      + "\n### Run: 10:05 | Thread: other | Task: t\n\n| *s* | **B** | other row | m | **[FACT]** |\n",
+                      encoding="utf-8")
+    cfg = _reviewer_cfg(context=["draft", "matrix"])
+    cfg["swarm"]["traceability_matrix"] = str(matrix)
+    cfg["hitl"] = {"enabled": True, "checkpoints": []}
+    reviewer = FakeReviewer(["APPROVED"])
+    run(build(cfg, FakeChat([decision(["Journalist"])]), reviewer), config={"configurable": {"thread_id": "mine"}})
+    sent = reviewer.calls[0][1].content
+    assert "my row" in sent and "other row" not in sent

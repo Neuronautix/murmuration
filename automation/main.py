@@ -210,7 +210,7 @@ MATRIX_HEADER = (
 
 # ── Helper functions ──────────────────────────────────────────────────────
 
-def _ensure_matrix_header(config: dict, task: str, resumed_thread: str = "") -> None:
+def _ensure_matrix_header(config: dict, task: str, resumed_thread: str = "", thread_id: str = "") -> None:
     """Create the traceability matrix with its table header if it does not exist,
     then append a run-separator line so each run's entries are clearly delimited."""
     matrix_path = resolve_swarm_path(config, "traceability_matrix")
@@ -220,9 +220,15 @@ def _ensure_matrix_header(config: dict, task: str, resumed_thread: str = "") -> 
 
     run_stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     task_preview = task[:80] + "…" if len(task) > 80 else task
-    label = f"Resumed run {resumed_thread}" if resumed_thread else "Run"
+    # The thread id lets the reviewer's matrix excerpt find this run's rows again after a resume.
+    if resumed_thread:
+        separator = f"### Resumed run {resumed_thread}: {run_stamp} | Task: {task_preview}"
+    elif thread_id:
+        separator = f"### Run: {run_stamp} | Thread: {thread_id} | Task: {task_preview}"
+    else:
+        separator = f"### Run: {run_stamp} | Task: {task_preview}"
     with open(matrix_path, "a", encoding="utf-8") as f:
-        f.write(f"\n### {label}: {run_stamp} | Task: {task_preview}\n\n")
+        f.write(f"\n{separator}\n\n")
 
 
 def _write_run_metrics(config: dict, task: str, token_usage: dict) -> None:
@@ -590,8 +596,10 @@ def _run_graph(config: dict, prompt: str, resume_thread: str | None = None) -> N
         )
         raise typer.Exit(code=1)
 
+    # A thread id is needed whenever there is a checkpointer; it also tags this run's matrix section.
+    thread_id = resume_thread or (str(uuid.uuid4()) if checkpointer_cfg["type"] != "none" else "")
     if not resume_thread:
-        _ensure_matrix_header(config, prompt)
+        _ensure_matrix_header(config, prompt, thread_id=thread_id)
 
     hitl_cfg = get_hitl_config(config)
     hitl_enabled = hitl_cfg.get("enabled", False)
@@ -616,7 +624,6 @@ def _run_graph(config: dict, prompt: str, resume_thread: str | None = None) -> N
     # limit is derived from the configured safety valves so LangGraph's own step
     # guard can never fire before max_agent_calls / max_revision_loops do.
     run_config = {"recursion_limit": compute_recursion_limit(config)}
-    thread_id = resume_thread or (str(uuid.uuid4()) if checkpointer_cfg["type"] != "none" else "")
     if thread_id:
         run_config["configurable"] = {"thread_id": thread_id}
         typer.secho(f"🧵 Thread: {thread_id}", fg=typer.colors.CYAN)
