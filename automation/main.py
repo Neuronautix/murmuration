@@ -68,13 +68,20 @@ from automation.builder.wizard import (
     upsert_tool_in_spec,
 )
 from automation.config import (
+    findings_slug,
     get_hitl_config,
+    get_run_log_path,
     load_config,
     resolve_swarm_path,
     validate_env,
 )
 from automation.exporters import export_hcm_mapppp_bundle
-from automation.graph import Command, build_graph, compute_recursion_limit  # Command re-exported from graph.py
+from automation.graph import (  # Command re-exported from graph.py
+    Command,
+    _message_text,
+    build_graph,
+    compute_recursion_limit,
+)
 from automation.hcm_pilot import run_hcm_pilot
 
 # Load environment configuration (.env)
@@ -284,6 +291,100 @@ def _display_event_messages(event: dict) -> None:
                 )
 
 
+class _RunRecorder:
+    """Writes the optional run artefacts of one run as the graph streams.
+
+    swarm.run_log           one JSON line per node update (plus run start/end
+                            and HITL answers), appended as it happens.
+    swarm.persist_findings  <output_dir>/findings/<persona-slug>.md, rewritten
+                            after every specialist update.
+
+    Both are off by default. Each write opens and closes its file, so a crash
+    keeps everything recorded up to that point. A write that fails (locked file,
+    full disk) disables that output with a warning instead of stopping the run.
+    """
+
+    def __init__(self, config: dict, thread_id: str = ""):
+        self.log_path = get_run_log_path(config)
+        self.findings_dir = (
+            resolve_swarm_path(config, "output_dir") / "findings"
+            if (config.get("swarm") or {}).get("persist_findings") else None
+        )
+        self.journalist = (config.get("orchestrator") or {}).get("journalist")
+        # Lines from several runs can share one file: every line carries the run id.
+        self.run_id = thread_id or uuid.uuid4().hex
+        self.started = datetime.datetime.now().isoformat(timespec="seconds")
+        self.pending_answer = None
+
+    def _disable(self, what: str, error: OSError) -> None:
+        typer.secho(f"⚠️  Could not write {what} ({error}); it is disabled for the rest of this run.",
+                    fg=typer.colors.YELLOW)
+
+    def _write(self, record: dict) -> None:
+        if self.log_path is None:
+            return
+        record = {"timestamp": datetime.datetime.now().isoformat(timespec="milliseconds"),
+                  "run_id": self.run_id, **record}
+        try:
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        except OSError as e:
+            self._disable(f"swarm.run_log {self.log_path}", e)
+            self.log_path = None
+
+    def start(self, task: str) -> None:
+        self._write({"event": "run_start", "task": task})
+
+    def hitl_answer(self, checkpoint: str, answer: str) -> None:
+        # Attached to the checkpoint node's update, which is the first one after the resume.
+        self.pending_answer = {"checkpoint": checkpoint, "answer": answer}
+
+    def node(self, node_name: str, update: dict) -> None:
+        record = {"event": "node", "node": node_name}
+        for key, field_name in (("next_agents", "next_agents"), ("routing_reasoning", "routing_reasoning"),
+                                ("agent_assignments", "assignments"), ("token_usage", "token_delta"),
+                                ("final_status", "final_status")):
+            if key in update:
+                record[field_name] = update[key]
+        if "reviewer_approved" in update:
+            approved = update["reviewer_approved"]
+            record["verdict"] = update.get("final_status") or ("approved" if approved else "rejected")
+            if not approved and update.get("next_instructions"):
+                record["feedback"] = update["next_instructions"]
+        if update.get("agent_outputs"):
+            record["outputs_from"] = list(update["agent_outputs"])
+        if update.get("messages"):
+            record["message"] = _message_text(update["messages"][-1])[:500]
+        if self.pending_answer is not None:
+            record["hitl"] = self.pending_answer
+            self.pending_answer = None
+        self._write(record)
+        self._persist_findings(update.get("agent_outputs") or {})
+
+    def _persist_findings(self, outputs: dict) -> None:
+        if self.findings_dir is None:
+            return
+        try:
+            for name, text in outputs.items():
+                if name == self.journalist:
+                    continue
+                self.findings_dir.mkdir(parents=True, exist_ok=True)
+                (self.findings_dir / f"{findings_slug(name)}.md").write_text(
+                    f"# Findings — {name}\n\n<!-- run {self.run_id}, started {self.started} -->\n\n{text}\n",
+                    encoding="utf-8",
+                )
+        except OSError as e:
+            self._disable(f"swarm.persist_findings in {self.findings_dir}", e)
+            self.findings_dir = None
+
+    def end(self, final_status: str, token_usage: dict, error: BaseException = None) -> None:
+        record = {"event": "run_end", "final_status": final_status, "token_usage": token_usage}
+        if error is not None:
+            record["error"] = f"{type(error).__name__}: {error}"
+        self._write(record)
+
+
 def _handle_hitl_interrupt(interrupt_objs) -> str:
     """Display HITL checkpoint prompt and return the user's answer."""
     # interrupt_objs is a tuple/list of Interrupt(value=...) from the stream
@@ -340,39 +441,61 @@ async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict) -
         "token_usage": {},
     }
 
+    recorder = _RunRecorder(config, ((run_config or {}).get("configurable") or {}).get("thread_id", ""))
+    recorder.start(prompt)
+
     typer.secho("\n🧠 [SWARM ACTIVE] Streaming agent interactions...\n", fg=typer.colors.BLUE)
 
-    while True:
-        interrupted = False
+    try:
+        while True:
+            interrupted = False
 
-        async for event in graph.astream(
-            current_input,
-            config=run_config,
-            stream_mode="updates",
-        ):
-            # Accumulate token_usage from any node update that carries it
-            for node_name, update in event.items():
-                if isinstance(update, dict) and "token_usage" in update:
-                    for k, v in update["token_usage"].items():
-                        if isinstance(v, (int, float)):
-                            final_token_usage[k] = final_token_usage.get(k, 0) + v
-                if isinstance(update, dict) and update.get("final_status"):
-                    final_status = update["final_status"]
+            async for event in graph.astream(
+                current_input,
+                config=run_config,
+                stream_mode="updates",
+            ):
+                # Accumulate token_usage from any node update that carries it
+                for node_name, update in event.items():
+                    if not isinstance(update, dict):
+                        continue
+                    if "token_usage" in update:
+                        for k, v in update["token_usage"].items():
+                            if isinstance(v, (int, float)):
+                                final_token_usage[k] = final_token_usage.get(k, 0) + v
+                    if update.get("final_status"):
+                        final_status = update["final_status"]
+                    recorder.node(node_name, update)
 
-            # Check for interrupt before displaying messages
-            if "__interrupt__" in event:
-                interrupt_objs = event["__interrupt__"]
-                answer = _handle_hitl_interrupt(interrupt_objs)
-                current_input = Command(resume=answer)
-                interrupted = True
-                break
+                # Check for interrupt before displaying messages
+                if "__interrupt__" in event:
+                    interrupt_objs = event["__interrupt__"]
+                    answer = _handle_hitl_interrupt(interrupt_objs)
+                    recorder.hitl_answer(_interrupt_checkpoint(interrupt_objs), answer)
+                    current_input = Command(resume=answer)
+                    interrupted = True
+                    break
 
-            _display_event_messages(event)
+                _display_event_messages(event)
 
-        if not interrupted:
-            break  # Graph completed naturally
+            if not interrupted:
+                break  # Graph completed naturally
+    except BaseException as e:  # Ctrl-C and cancellation are logged too
+        recorder.end("interrupted" if isinstance(e, (KeyboardInterrupt, asyncio.CancelledError)) else "error",
+                     final_token_usage, error=e)
+        raise
 
+    recorder.end(final_status, final_token_usage)
     return final_token_usage, final_status
+
+
+def _interrupt_checkpoint(interrupt_objs) -> str:
+    """Name of the checkpoint answered by _handle_hitl_interrupt (which answers the last interrupt)."""
+    checkpoint = "checkpoint"
+    for intr in interrupt_objs:
+        payload = intr.value if hasattr(intr, "value") else intr
+        checkpoint = payload.get("checkpoint", "checkpoint") if isinstance(payload, dict) else "checkpoint"
+    return checkpoint
 
 
 def _run_graph(config: dict, prompt: str) -> None:
@@ -427,10 +550,15 @@ def _run_graph(config: dict, prompt: str) -> None:
         )
     except Exception as e:
         typer.secho(f"\nExecution Error: {e}", fg=typer.colors.RED)
+        if get_run_log_path(config):
+            typer.secho(f"🧾 Run log: {get_run_log_path(config)}", fg=typer.colors.CYAN)
         raise typer.Exit(code=1)
 
     output_dir = resolve_swarm_path(config, "output_dir")
     _write_run_metrics(config, prompt, final_token_usage)
+    run_log = get_run_log_path(config)
+    if run_log:
+        typer.secho(f"🧾 Run log: {run_log}", fg=typer.colors.CYAN)
 
     if final_status == "failed":
         typer.secho(

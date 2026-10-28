@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from automation.config import build_journalist_brief, load_config
+from automation.config import build_journalist_brief, findings_slug, get_run_log_path, load_config
 
 console = Console()
 
@@ -187,6 +187,26 @@ def _check_journalist_brief(report: SwarmDoctorReport, config: dict) -> None:
         report.issues.append(ValidationIssue("error", str(e), "swarm_config.yml"))
 
 
+def _check_run_artefacts(report: SwarmDoctorReport, config: dict) -> None:
+    """swarm.run_log must name a file; a directory would make the first write fail mid-run."""
+    run_log = get_run_log_path(config)
+    if run_log is not None and run_log.is_dir():
+        report.issues.append(ValidationIssue(
+            "error", f"swarm.run_log points to a directory ({run_log}); give a file path such as "
+            "./Drafts/run_log.jsonl", "swarm_config.yml",
+        ))
+    if (config.get("swarm") or {}).get("persist_findings"):
+        by_slug: dict[str, list[str]] = {}
+        for persona in config.get("personas", []):
+            by_slug.setdefault(findings_slug(persona.get("name", "")), []).append(persona.get("name", ""))
+        for slug, names in by_slug.items():
+            if len(names) > 1:
+                report.issues.append(ValidationIssue(
+                    "error", f"swarm.persist_findings: personas {', '.join(names)} would all write "
+                    f"findings/{slug}.md; rename one of them", "swarm_config.yml",
+                ))
+
+
 def _check_reviewer_semantics(report: SwarmDoctorReport, reviewer: dict) -> None:
     reviewer_enabled = reviewer.get("enabled", True)
     max_revision_loops = reviewer.get("max_revision_loops", 3)
@@ -344,6 +364,7 @@ def inspect_swarm(root_dir: Path) -> SwarmDoctorReport:
     )
     _check_reviewer_semantics(report, reviewer)
     _check_journalist_brief(report, config)
+    _check_run_artefacts(report, config)
     _check_traceability_coverage(
         report,
         personas,

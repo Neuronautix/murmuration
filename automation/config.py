@@ -13,6 +13,7 @@ through swarm_config.yml and agents/*/persona.md files.
 
 import importlib
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -63,7 +64,21 @@ def load_config(config_path: Path = CONFIG_PATH) -> dict:
         if brief is not None and not isinstance(brief, str):
             raise ValueError("swarm_config.yml: 'journalist.brief' must be a string (use a YAML block scalar '|').")
 
+    _validate_options(config)
     return config
+
+
+def _validate_options(config: dict) -> None:
+    """Check the optional keys that tune orchestration; raise ValueError naming the key path."""
+    swarm = config.get("swarm") or {}
+    run_log = swarm.get("run_log")
+    if run_log is not None and run_log is not False and not (isinstance(run_log, str) and run_log.strip()):
+        raise ValueError(
+            f"swarm_config.yml: swarm.run_log must be a file path or false, not {run_log!r}."
+        )
+    persist = swarm.get("persist_findings")
+    if persist is not None and not isinstance(persist, bool):
+        raise ValueError(f"swarm_config.yml: swarm.persist_findings must be true or false, not {persist!r}.")
 
 
 SWARM_PATH_DEFAULTS = {
@@ -86,8 +101,23 @@ def resolve_swarm_path(config: dict | None, key: str) -> Path:
         except (FileNotFoundError, ValueError, yaml.YAMLError):
             config = {}
     raw = (config.get("swarm") or {}).get(key) or SWARM_PATH_DEFAULTS[key]
+    return _resolve_project_path(raw)
+
+
+def _resolve_project_path(raw: str) -> Path:
     path = Path(raw).expanduser()
     return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
+
+
+def get_run_log_path(config: dict) -> Path | None:
+    """Resolve ``swarm.run_log``; None when the run log is off (the default)."""
+    raw = (config.get("swarm") or {}).get("run_log")
+    return _resolve_project_path(raw) if raw else None
+
+
+def findings_slug(name: str) -> str:
+    """File stem for a persona's persisted findings (Unicode letters kept, lower case)."""
+    return re.sub(r"[^\w]+|_+", "-", name).strip("-").lower() or "agent"
 
 
 def load_persona_content(persona_file: str) -> str:

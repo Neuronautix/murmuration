@@ -27,6 +27,13 @@ swarm:
   description: "Autonomous research swarm for [your domain]"
   output_dir: "./Drafts"
   traceability_matrix: "./Knowledge_Traceability_Matrix.md"
+  # run_log:           JSON Lines record of every node update (routing reasoning,
+  #                    assignments, reviewer verdicts, HITL answers, token deltas).
+  #                    A file path, or false to disable (default false).
+  # persist_findings:  write each specialist's findings to <output_dir>/findings/
+  #                    as soon as it reports, so a crash cannot lose them (default false).
+  # run_log: "./Drafts/run_log.jsonl"
+  # persist_findings: true
 
 # ── Orchestrator Settings ────────────────────────────
 # Controls the multi-agent supervisor pattern.

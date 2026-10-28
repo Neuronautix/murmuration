@@ -64,9 +64,21 @@ New findings fixed in the same pass:
 All 85 tests in the suite pass and no `xfail` markers remain. Every new or rewritten test
 was run against the pre-fix commit and fails there.
 
-Still open: the design items **I1–I6** and **R2, R5, R6, R9, R10** (reviewer-to-orchestrator
-evidence loop, structured findings, persistent checkpointer, run log, fan-out limit, reviewer
-context). R2 is partly addressed: a force-approved draft is now reported as such by `execute`.
+Still open after the third follow-up: the design items **I1–I6** and **R2, R5, R6, R9, R10**
+(reviewer-to-orchestrator evidence loop, structured findings, persistent checkpointer, run log,
+fan-out limit, reviewer context). R2 was partly addressed: a force-approved draft is reported
+as such by `execute`.
+
+#### Fourth follow-up: the open design items
+
+Each item became an optional config key whose default reproduces the previous behaviour.
+One commit per workstream; every new behaviour test was run against the commit before it
+and fails there.
+
+| Item | Status | Key(s) | Notes |
+| --- | --- | --- | --- |
+| R6 | fixed | `swarm.run_log` | One JSON line per node update, plus run start/end (`final_status: error` or `interrupted` when the run dies). Every line has a `run_id`. HITL answers are attached to the checkpoint node's line. Written from the stream loop in `main._run_graph_async()`, so the graph is unchanged. A failed write disables the log with a warning rather than killing the run. The `pre_flight` answer is not logged: it is a CLI prompt before the graph starts. |
+| I5 | fixed | `swarm.persist_findings` | `<output_dir>/findings/<persona-slug>.md` is rewritten after every specialist update, from the same stream loop, with the run id in a header comment. The Journalist's draft is not written there; its own writing tool saves it. `doctor` reports personas whose names map to the same file. |
 
 ---
 

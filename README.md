@@ -221,6 +221,22 @@ never re-runs the orchestrator or the reviewer: what you approve is what runs.
 
 ---
 
+## Orchestration Options
+
+All of these keys are optional. Leaving one out keeps the behaviour described in its
+"Default" column, so an older `swarm_config.yml` runs exactly as before. `swarm doctor`
+and `load_config()` reject invalid values and name the offending key.
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `swarm.run_log` | `false` | Path of a JSON Lines file. Each node update adds one line with the node, timestamp, `next_agents`, routing reasoning, assignments, reviewer verdict and feedback, HITL answer, token delta and `final_status`. Run start and end are logged too, including crashes and Ctrl-C. Every line carries a `run_id` (the checkpoint thread id when there is one), so several runs can share a file. Relative paths resolve against the project root. |
+| `swarm.persist_findings` | `false` | After each specialist update, write its findings to `<output_dir>/findings/<persona-slug>.md`, so a crash before the Journalist does not lose them. Each file names the run that wrote it; files from earlier runs are not deleted. |
+
+If a run log or findings file cannot be written (locked file, full disk), the run continues
+and that output is switched off with a warning.
+
+---
+
 ## Repository Layout
 
 ```

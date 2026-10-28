@@ -958,3 +958,141 @@ def test_builder_round_trip_preserves_unmodelled_keys(tmp_path):
     cleared = yaml.safe_load(render_swarm_config(spec.model_copy(update={"reviewer_model_name": None})))
     assert "model" not in cleared["reviewer"]
     assert cleared["reviewer"]["custom_prompt"] == "Be strict."
+
+
+# ── 11. Observability: run log and persisted findings (R6, I5) ─────────────
+
+
+def _read_jsonl(path):
+    import json
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_run_log_writes_one_line_per_node_update(tmp_path):
+    from automation.main import _run_graph_async
+    cfg = make_config(max_rev=2)
+    cfg["swarm"]["run_log"] = str(tmp_path / "logs" / "run.jsonl")
+    chat = FakeChat([decision(["A"], assignments={"A": "look at X"}), decision(["Journalist"])])
+    graph = build(cfg, chat, FakeReviewer(["REJECTED: add limits", "APPROVED"]))
+    asyncio.run(_run_graph_async(cfg, "task", graph, {}))
+    lines = _read_jsonl(tmp_path / "logs" / "run.jsonl")
+    assert [line["event"] for line in (lines[0], lines[-1])] == ["run_start", "run_end"]
+    nodes = [line for line in lines if line["event"] == "node"]
+    assert [n["node"] for n in nodes] == ["orchestrator", "A", "orchestrator", "Journalist", "reviewer",
+                                         "Journalist", "reviewer"]
+    first = nodes[0]
+    assert first["next_agents"] == ["A"] and first["routing_reasoning"] == "because"
+    assert first["assignments"] == {"A": "look at X"}
+    assert first["token_delta"] == USAGE and "timestamp" in first
+    assert nodes[4]["verdict"] == "rejected" and nodes[4]["feedback"] == "REJECTED: add limits"
+    assert nodes[6]["verdict"] == "approved" and nodes[6]["final_status"] == "approved"
+    assert lines[-1]["final_status"] == "approved"
+    assert lines[-1]["token_usage"]["total_tokens"] > 0
+
+
+def test_run_log_records_hitl_answers(tmp_path):
+    from automation import main
+    cfg = make_config(hitl={"enabled": True, "checkpoints": ["post_plan"]})
+    cfg["swarm"]["run_log"] = str(tmp_path / "run.jsonl")
+    graph = build(cfg, FakeChat([decision(["A"]), decision(["Journalist"])]))
+    with patch.object(main, "_handle_hitl_interrupt", return_value="APPROVE"):
+        asyncio.run(main._run_graph_async(cfg, "task", graph, {"configurable": {"thread_id": "log-t"}}))
+    nodes = [line for line in _read_jsonl(tmp_path / "run.jsonl") if line["event"] == "node"]
+    hitl = [n for n in nodes if "hitl" in n]
+    assert len(hitl) == 1 and hitl[0]["node"] == "hitl_post_plan"
+    assert hitl[0]["hitl"] == {"checkpoint": "post_plan", "answer": "APPROVE"}
+    assert all(n["run_id"] == "log-t" for n in nodes)
+
+
+def test_persisted_findings_survive_a_crash(tmp_path):
+    from automation.main import _run_graph_async
+    cfg = make_config(specialists=("TOCSAS Lead", "B"))
+    cfg["orchestrator"]["on_agent_failure"] = "abort"
+    cfg["swarm"].update({"output_dir": str(tmp_path), "persist_findings": True, "run_log": str(tmp_path / "r.jsonl")})
+    chat = FakeChat([decision(["TOCSAS Lead", "B"]), decision(["Journalist"])], fail_for={"Journalist"})
+    graph = build(cfg, chat)
+    with pytest.raises(RuntimeError, match="simulated API failure in Journalist"):
+        asyncio.run(_run_graph_async(cfg, "task", graph, {}))
+    files = sorted(p.name for p in (tmp_path / "findings").iterdir())
+    assert files == ["b.md", "tocsas-lead.md"]
+    assert "findings from TOCSAS Lead" in (tmp_path / "findings" / "tocsas-lead.md").read_text(encoding="utf-8")
+    end = _read_jsonl(tmp_path / "r.jsonl")[-1]
+    assert end["event"] == "run_end" and end["final_status"] == "error" and "Journalist" in end["error"]
+
+
+def test_observability_is_off_by_default(tmp_path):
+    from automation.main import _run_graph_async
+    cfg = make_config()
+    cfg["swarm"]["output_dir"] = str(tmp_path)
+    graph = build(cfg, FakeChat([decision(["A"]), decision(["Journalist"])]))
+    asyncio.run(_run_graph_async(cfg, "task", graph, {}))
+    assert list(tmp_path.iterdir()) == []
+    from automation.config import CONFIG_PATH, get_run_log_path, load_config
+    root = load_config(CONFIG_PATH)
+    assert get_run_log_path(root) is None and not root["swarm"].get("persist_findings")
+
+
+@pytest.mark.parametrize("key, value, ok", [
+    ("run_log", True, False), ("run_log", "", False), ("run_log", 0, False), ("persist_findings", "yes", False),
+    ("run_log", None, True), ("run_log", False, True), ("persist_findings", None, True),
+])
+def test_load_config_validates_observability_keys(tmp_path, key, value, ok):
+    import yaml
+
+    from automation.config import CONFIG_PATH, load_config
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["swarm"][key] = value
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    if ok:
+        load_config(tmp_path / "swarm_config.yml")
+    else:
+        with pytest.raises(ValueError, match=f"swarm.{key}"):
+            load_config(tmp_path / "swarm_config.yml")
+
+
+def test_unwritable_run_artefacts_do_not_stop_the_run(tmp_path):
+    from automation.main import _run_graph_async
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x", encoding="utf-8")
+    cfg = make_config()
+    cfg["swarm"].update({"output_dir": str(blocker), "persist_findings": True, "run_log": str(blocker / "r.jsonl")})
+    graph = build(cfg, FakeChat([decision(["A"]), decision(["Journalist"])]))
+    usage, status = asyncio.run(_run_graph_async(cfg, "task", graph, {}))
+    assert status == "approved"
+
+
+def test_findings_files_name_the_run_and_keep_unicode_names(tmp_path):
+    from automation.config import findings_slug
+    from automation.main import _run_graph_async
+    assert findings_slug("Ärztin Lead") == "ärztin-lead" and findings_slug("A_B") == findings_slug("a b")
+    cfg = make_config(specialists=("Ärztin",))
+    cfg["swarm"].update({"output_dir": str(tmp_path), "persist_findings": True})
+    graph = build(cfg, FakeChat([decision(["Ärztin"]), decision(["Journalist"])]))
+    asyncio.run(_run_graph_async(cfg, "task", graph, {"configurable": {"thread_id": "th-9"}}))
+    assert "<!-- run th-9," in (tmp_path / "findings" / "ärztin.md").read_text(encoding="utf-8")
+
+
+def test_doctor_rejects_colliding_findings_files(tmp_path):
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["swarm"]["persist_findings"] = True
+    real["personas"][1]["name"] = "Lit_Scout"
+    real["personas"][3]["name"] = "lit scout"
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    errors = [i.message for i in inspect_swarm(tmp_path).issues if i.severity == "error"]
+    assert any("findings/lit-scout.md" in m for m in errors)
+
+
+def test_doctor_rejects_a_run_log_that_is_a_directory(tmp_path):
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["swarm"]["run_log"] = str(tmp_path)
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    errors = [i.message for i in inspect_swarm(tmp_path).issues if i.severity == "error"]
+    assert any("swarm.run_log points to a directory" in m for m in errors)
