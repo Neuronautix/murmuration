@@ -9,7 +9,16 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from automation.config import load_config
+from automation.config import (
+    build_journalist_brief,
+    findings_slug,
+    get_checkpointer_config,
+    get_run_log_path,
+    load_config,
+    persona_model_config,
+    resolve_swarm_path,
+    sqlite_saver_class,
+)
 
 console = Console()
 
@@ -70,6 +79,7 @@ def _check_routing_semantics(
     journalist_name: str,
     max_agent_calls: int,
     max_tool_rounds: int,
+    allow_orchestrator_tools: bool = False,
 ) -> None:
     persona_map = {persona.get("name", ""): persona for persona in personas}
     specialists = [
@@ -107,7 +117,18 @@ def _check_routing_semantics(
     orchestrator = persona_map.get(orchestrator_name)
     journalist = persona_map.get(journalist_name)
 
-    if orchestrator and not _has_any_tool(orchestrator, DISCOVERY_TOOLS):
+    # The orchestrator's tools are only loaded with orchestrator.allow_tools: true, so the
+    # two warnings below are exclusive: unused tools when off, missing discovery tools when on.
+    if orchestrator and not allow_orchestrator_tools and orchestrator.get("tools"):
+        report.issues.append(
+            ValidationIssue(
+                "warning",
+                f"orchestrator '{orchestrator_name}' lists tools {list(orchestrator['tools'])}, but they are "
+                "ignored unless orchestrator.allow_tools: true",
+                "swarm_config.yml",
+            )
+        )
+    if orchestrator and allow_orchestrator_tools and not _has_any_tool(orchestrator, DISCOVERY_TOOLS):
         report.issues.append(
             ValidationIssue(
                 "warning",
@@ -134,6 +155,174 @@ def _check_routing_semantics(
                     "swarm_config.yml",
                 )
             )
+
+
+def _check_traceability_coverage(
+    report: SwarmDoctorReport,
+    personas: list[dict],
+    tools: dict,
+    orchestrator_name: str,
+    journalist_name: str,
+    epistemic_tags: list,
+) -> None:
+    """Warn when evidence-gathering specialists cannot write to the traceability matrix.
+
+    The runtime tells every specialist to log each search result with an
+    epistemic tag, but only personas that have a matrix-writing tool can do so.
+    """
+    if not epistemic_tags:
+        return
+    trace_tools = {
+        name for name, spec in tools.items()
+        if (spec or {}).get("function") == "append_traceability_matrix"
+    }
+    if not trace_tools:
+        return
+    for persona in personas:
+        name = persona.get("name", "")
+        if name in {orchestrator_name, journalist_name}:
+            continue
+        if _has_any_tool(persona, DISCOVERY_TOOLS) and not _has_any_tool(persona, trace_tools):
+            report.issues.append(
+                ValidationIssue(
+                    "warning",
+                    f"specialist '{name}' has search tools but no traceability tool "
+                    f"({', '.join(sorted(trace_tools))}); its evidence will not reach the traceability matrix",
+                    "swarm_config.yml",
+                )
+            )
+
+
+def _check_journalist_brief(report: SwarmDoctorReport, config: dict) -> None:
+    """Render journalist.brief with the Journalist's real tool names so template errors surface here."""
+    journalist_name = (config.get("orchestrator") or {}).get("journalist")
+    journalist = next((p for p in config.get("personas", []) if p.get("name") == journalist_name), None)
+    tool_names = []
+    for key in (journalist or {}).get("tools", []):
+        spec = (config.get("tools") or {}).get(key) or {}
+        if spec.get("function"):
+            tool_names.append(spec["function"])
+    try:
+        build_journalist_brief(config, tool_names)
+    except ValueError as e:
+        report.issues.append(ValidationIssue("error", str(e), "swarm_config.yml"))
+
+
+def _check_run_artefacts(report: SwarmDoctorReport, config: dict) -> None:
+    """swarm.run_log must name a file; a directory would make the first write fail mid-run."""
+    run_log = get_run_log_path(config)
+    if run_log is not None and run_log.is_dir():
+        report.issues.append(ValidationIssue(
+            "error", f"swarm.run_log points to a directory ({run_log}); give a file path such as "
+            "./Drafts/run_log.jsonl", "swarm_config.yml",
+        ))
+    if (config.get("swarm") or {}).get("persist_findings"):
+        by_slug: dict[str, list[str]] = {}
+        for persona in config.get("personas", []):
+            by_slug.setdefault(findings_slug(persona.get("name", "")), []).append(persona.get("name", ""))
+        for slug, names in by_slug.items():
+            if len(names) > 1:
+                report.issues.append(ValidationIssue(
+                    "error", f"swarm.persist_findings: personas {', '.join(names)} would all write "
+                    f"findings/{slug}.md; rename one of them", "swarm_config.yml",
+                ))
+
+
+def _check_collaboration(report: SwarmDoctorReport, config: dict) -> None:
+    """Structured findings take their tag vocabulary from epistemic_tags."""
+    collaboration = config.get("collaboration") or {}
+    if collaboration.get("structured_findings") and not config.get("epistemic_tags"):
+        report.issues.append(ValidationIssue(
+            "warning", "collaboration.structured_findings is on but epistemic_tags is empty, so claim tags "
+            "are not checked against a vocabulary", "swarm_config.yml",
+        ))
+
+
+def _check_reviewer_routing(report: SwarmDoctorReport, config: dict) -> None:
+    """reviewer.on_rejection / context settings that cannot take effect."""
+    reviewer = config.get("reviewer") or {}
+    on_rejection = reviewer.get("on_rejection", "journalist")
+    if on_rejection != "journalist":
+        if not reviewer.get("enabled", True):
+            report.issues.append(ValidationIssue(
+                "warning", f"reviewer.on_rejection is '{on_rejection}' but the reviewer is disabled",
+                "swarm_config.yml",
+            ))
+        elif reviewer.get("max_evidence_loops", 1) == 0:
+            report.issues.append(ValidationIssue(
+                "warning", f"reviewer.on_rejection is '{on_rejection}' but max_evidence_loops is 0, so every "
+                "rejection still goes to the Journalist", "swarm_config.yml",
+            ))
+    if "matrix" in (reviewer.get("context") or []):
+        trace_tools = {name for name, spec in (config.get("tools") or {}).items()
+                       if (spec or {}).get("function") == "append_traceability_matrix"}
+        orchestrator = (config.get("orchestrator") or {})
+        loggers = [p for p in config.get("personas", []) if trace_tools & set(p.get("tools", []))
+                   and (p.get("name") != orchestrator.get("agent") or orchestrator.get("allow_tools") is True)]
+        if not loggers:
+            report.issues.append(ValidationIssue(
+                "warning", "reviewer.context includes matrix, but no persona can log to the traceability "
+                "matrix, so the reviewer will see an empty excerpt", "swarm_config.yml",
+            ))
+
+
+def _check_early_stop(report: SwarmDoctorReport, orchestrator: dict) -> None:
+    """early_stop.min_rounds at or above max_agent_calls can never be reached.
+
+    Each round uses at least one call, and the safety valve takes over once
+    max_agent_calls is reached, so the last LLM routing pass has at most
+    max_agent_calls - 1 rounds behind it.
+    """
+    early_stop = orchestrator.get("early_stop") or {}
+    min_rounds, max_calls = early_stop.get("min_rounds", 1), orchestrator.get("max_agent_calls", 8)
+    if early_stop.get("enabled") is True and isinstance(max_calls, int) and min_rounds >= max_calls:
+        report.issues.append(ValidationIssue(
+            "warning", f"orchestrator.early_stop.min_rounds ({min_rounds}) is not below max_agent_calls "
+            f"({max_calls}); early stop can never apply", "swarm_config.yml",
+        ))
+
+
+def _check_checkpointer(report: SwarmDoctorReport, config: dict) -> None:
+    """checkpointer: the sqlite saver needs the optional extra; memory alone cannot resume a crash."""
+    settings = get_checkpointer_config(config)
+    explicit = (config.get("checkpointer") or {}).get("type")
+    if settings["type"] == "sqlite":
+        try:
+            sqlite_saver_class()
+        except RuntimeError as e:
+            report.issues.append(ValidationIssue("error", str(e), "swarm_config.yml"))
+        if settings["path"].is_dir():
+            report.issues.append(ValidationIssue(
+                "error", f"checkpointer.path points to a directory ({settings['path']}); give a file path",
+                "swarm_config.yml",
+            ))
+        output_dir = resolve_swarm_path(config, "output_dir")
+        if output_dir == settings["path"] or output_dir in settings["path"].parents:
+            report.issues.append(ValidationIssue(
+                "warning", f"checkpointer.path is inside swarm.output_dir ({output_dir}); git_commit_snapshot "
+                "commits that folder, so the binary run state would be committed. Use ./.murmuration/",
+                "swarm_config.yml",
+            ))
+    elif explicit == "memory" and not (config.get("hitl") or {}).get("enabled"):
+        report.issues.append(ValidationIssue(
+            "warning", "checkpointer.type: memory without HITL keeps checkpoints only while the process "
+            "runs, so a crashed run cannot be resumed; use type: sqlite for --resume", "swarm_config.yml",
+        ))
+
+
+def _check_persona_models(report: SwarmDoctorReport, config: dict) -> None:
+    """personas[].model: flag API keys missing from the shell (the base key is checked separately)."""
+    base_key = (config.get("model") or {}).get("env_key", "OPENAI_API_KEY")
+    for persona in config.get("personas", []):
+        merged = persona_model_config(config, persona) if isinstance(persona, dict) else None
+        if merged is None:
+            continue
+        name = persona.get("name", "")
+        env_key = merged.get("env_key", "OPENAI_API_KEY")
+        if env_key != base_key and not os.getenv(env_key):
+            report.issues.append(ValidationIssue(
+                "warning", f"model env key '{env_key}' for persona '{name}' is not set in the current shell", ".env",
+            ))
 
 
 def _check_reviewer_semantics(report: SwarmDoctorReport, reviewer: dict) -> None:
@@ -290,8 +479,24 @@ def inspect_swarm(root_dir: Path) -> SwarmDoctorReport:
         journalist_name=journalist,
         max_agent_calls=orchestrator_block.get("max_agent_calls", 0),
         max_tool_rounds=orchestrator_block.get("max_tool_rounds_per_agent", 0),
+        allow_orchestrator_tools=orchestrator_block.get("allow_tools", False) is True,
     )
     _check_reviewer_semantics(report, reviewer)
+    _check_journalist_brief(report, config)
+    _check_run_artefacts(report, config)
+    _check_persona_models(report, config)
+    _check_checkpointer(report, config)
+    _check_early_stop(report, orchestrator_block)
+    _check_reviewer_routing(report, config)
+    _check_collaboration(report, config)
+    _check_traceability_coverage(
+        report,
+        personas,
+        tools,
+        orchestrator_name=orchestrator,
+        journalist_name=journalist,
+        epistemic_tags=config.get("epistemic_tags", []) or [],
+    )
 
     seen_names = set()
     seen_paths = set()

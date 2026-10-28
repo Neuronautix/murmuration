@@ -32,6 +32,11 @@ automation/db/
 Drafts/**/*.md
 Drafts/**/*.json
 Knowledge_Traceability_Matrix*.md
+# checkpointer.type: sqlite (binary run state; default path .murmuration/)
+.murmuration/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 
 # OS
 .DS_Store

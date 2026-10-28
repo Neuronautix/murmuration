@@ -25,9 +25,11 @@ Built-in Tools:
 import os
 import re
 import subprocess
+import threading
 from pathlib import Path
 
 import requests
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 # ═══════════════════════════════════════════════════════
@@ -157,6 +159,7 @@ def search_pubmed(query: str, max_results: int = 3) -> str:
                 "retmode": "json",
                 "retmax": max_results,
             },
+            timeout=20,
         )
         search_resp.raise_for_status()
         id_list = search_resp.json().get("esearchresult", {}).get("idlist", [])
@@ -175,6 +178,7 @@ def search_pubmed(query: str, max_results: int = 3) -> str:
                 "rettype": "abstract",
                 "retmode": "xml",
             },
+            timeout=20,
         )
         fetch_resp.raise_for_status()
 
@@ -556,10 +560,52 @@ def write_manuscript_section(section_name: str, content: str) -> str:
 
 
 _MATRIX_HEADER_SENTINEL = "| Source |"  # first cell of the expected table header
+_MATRIX_LOCK = threading.Lock()
 
 
+def _md_cell(value) -> str:
+    """Make a value safe for a single Markdown table cell (no row/column breaks)."""
+    return " ".join(str(value).split()).replace("|", "\\|")
+
+
+def _calling_agent(config: RunnableConfig | None) -> str:
+    """Persona that issued the tool call, as set by the graph node; 'Auto-Agent' if unknown."""
+    from automation.config import AGENT_METADATA_KEY
+
+    name = ((config or {}).get("metadata") or {}).get(AGENT_METADATA_KEY)
+    return str(name) if name else "Auto-Agent"
+
+
+def matrix_row(source: str, agent: str, claim: str, method: str, epistemic_tag: str) -> str:
+    """One Markdown row of the traceability matrix, with every cell made table-safe."""
+    return (
+        f"| *Live Search:* {_md_cell(source)} | **{_md_cell(agent)}** | "
+        f"{_md_cell(claim)} | {_md_cell(method)} | **{_md_cell(epistemic_tag)}** |\n"
+    )
+
+
+def write_matrix_rows(filepath, rows: list) -> str:
+    """Append pre-formatted rows to an existing matrix; 'SUCCESS…' or a 'FAILED…' reason.
+
+    Used by the graph to log structured findings (collaboration.structured_findings)
+    with the same format, header guard and lock as the agents' tool.
+    """
+    if not os.path.exists(filepath):
+        return f"FAILED: '{filepath}' does not exist."
+    try:
+        if _MATRIX_HEADER_SENTINEL not in Path(filepath).read_text(encoding="utf-8"):
+            return "FAILED: expected table header not found in the traceability matrix."
+        with _MATRIX_LOCK, open(filepath, "a", encoding="utf-8") as f:
+            f.write("".join(rows))
+        return f"SUCCESS: logged {len(rows)} row(s)."
+    except Exception as e:
+        return f"FAILED: {e}"
+
+
+# `config` is injected by LangChain (it is annotated RunnableConfig) and is not part of the
+# schema the model sees; the graph puts the calling persona's name in its metadata.
 @tool
-def append_traceability_matrix(fact: str, source: str, epistemic_tag: str) -> str:
+def append_traceability_matrix(fact: str, source: str, epistemic_tag: str, config: RunnableConfig) -> str:
     """Logs a documented fact and its source into the Knowledge Traceability Matrix.
     Use this IMMEDIATELY after using search tools to secure the epistemic integrity trail.
 
@@ -595,12 +641,11 @@ def append_traceability_matrix(fact: str, source: str, epistemic_tag: str) -> st
         )
 
     try:
-        new_row = (
-            f"| *Live Search:* {source} | **Auto-Agent** | "
-            f"{fact} | Automatically sourced and summarized via Tool API. | "
-            f"**{epistemic_tag}** |\n"
-        )
-        with open(filepath, "a", encoding="utf-8") as f:
+        new_row = matrix_row(source, _calling_agent(config), fact,
+                             "Automatically sourced and summarized via Tool API.", epistemic_tag)
+        # Parallel specialists call this from a shared thread pool; on Windows an
+        # append is seek-then-write, so unserialised appends can overwrite each other.
+        with _MATRIX_LOCK, open(filepath, "a", encoding="utf-8") as f:
             f.write(new_row)
         return f"SUCCESS: Logged '{epistemic_tag}' finding to Traceability Matrix."
     except Exception as e:

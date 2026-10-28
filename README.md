@@ -191,6 +191,12 @@ For maximum adversarial diversity, set the reviewer to a different model provide
 
 ---
 
+## Journalist Brief
+
+The instructions the Journalist receives with the collected findings come from `journalist.brief` in `swarm_config.yml`. It is a Jinja2 template that can read any top-level config key (for example a custom `output_sections` list) plus `required_elements`, `tool_names` and `journalist_name`. When omitted, the default brief lists `reviewer.required_elements` as mandatory bullets and asks the Journalist to save its output with its writing tool. Put domain-specific output requirements here, never in Python; `examples/toxicology/` and `examples/hcm/` show briefs that enforce a fixed section list.
+
+---
+
 ## Human-in-the-Loop
 
 Enable HITL checkpoints in `swarm_config.yml` to pause the swarm at key decision points:
@@ -204,6 +210,60 @@ hitl:
     - pre_journalist   # add framing instructions before the Journalist writes
     - on_rejection     # choose REVISE / OVERRIDE when Reviewer-2 rejects
 ```
+
+At `post_plan`, type `APPROVE`, or exact persona names separated by commas to replace the
+plan (for example `LitScout, Journalist`). Anything else you type is passed to the agents
+as a `USER REDIRECT` note without changing the plan. Framing typed at `pre_journalist` is
+shown to the Journalist on every draft, revisions included.
+
+Each checkpoint is its own graph node and makes no model calls, so answering a checkpoint
+never re-runs the orchestrator or the reviewer: what you approve is what runs.
+
+---
+
+## Orchestration Options
+
+All of these keys are optional. Leaving one out keeps the behaviour described in its
+"Default" column, so an older `swarm_config.yml` runs exactly as before. `swarm doctor`
+and `load_config()` reject invalid values and name the offending key.
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `swarm.run_log` | `false` | Path of a JSON Lines file. Each node update adds one line with the node, timestamp, `next_agents`, routing reasoning, assignments, reviewer verdict and feedback, HITL answer, token delta and `final_status`. Run start and end are logged too, including crashes and Ctrl-C. Every line carries a `run_id` (the checkpoint thread id when there is one), so several runs can share a file. Relative paths resolve against the project root. |
+| `swarm.persist_findings` | `false` | After each specialist update, write its findings to `<output_dir>/findings/<persona-slug>.md`, so a crash before the Journalist does not lose them. Each file names the run that wrote it; files from earlier runs are not deleted. |
+| `orchestrator.allow_tools` | `false` | When `true`, the orchestrator persona runs a bounded tool loop with its own `tools:` (at most `max_tool_rounds_per_agent` rounds, plus one summary call if it is still calling tools) before each routing decision except the safety-valve pass, and its short report is added to the routing prompt. Its tokens count towards the run's usage. When `false`, its tools are not loaded and `swarm doctor` warns that they are ignored. The toxicology, FAIR-NAMs and PIU examples set it to `true`. |
+| `orchestrator.max_parallel_agents` | `null` | Maximum number of specialists running their model and tool calls at the same time when the orchestrator dispatches several in parallel. The others wait; none is skipped, and `max_agent_calls` counts them as before. Use it to stay under provider rate limits. |
+| `orchestrator.early_stop` | `{enabled: false, min_rounds: 1}` | When enabled, the orchestrator is asked to set `sufficient_evidence` and describe `coverage` once the findings answer the task. After at least `min_rounds` specialist rounds, that sends the run straight to the Journalist, which receives the coverage note. |
+| `orchestrator.max_findings_chars` / `max_peer_chars` | `1500` / `600` | How much of each specialist's findings the orchestrator and the other specialists see. The view ends at the last paragraph break, sentence end or space within the limit (never less than half of it), not mid-word. The Journalist always reads the full text. |
+| `personas[].model` | none | A `{provider, name, temperature, env_key}` block on any persona, orchestrator and Journalist included, merged over `model` the way `reviewer.model` is. Personas with the same merged spec share one client. `execute` checks that each persona's key is set. `env_key` only names the variable to check (the client reads its provider's standard variable); switching `provider` without `env_key` checks that provider's standard variable. The cost estimate still prices every token with `model.pricing`. |
+| `checkpointer` | `{type: none}`, or `{type: memory}` when HITL is on | Where the run state is saved after every step. `sqlite` (with optional `path`, default `./.murmuration/checkpoints.sqlite`, kept out of `output_dir` because `git_commit_snapshot` commits that folder) keeps it in a file so a run can be resumed from a new process; it needs `pip install 'murmuration[persist]'`. `none` cannot be combined with HITL. |
+| `reviewer.on_rejection` | `journalist` | Where a rejected draft goes. `journalist`: the Journalist revises alone. `orchestrator`: the orchestrator first gathers more evidence (its routing prompt gets a `REVIEWER REQUESTS` block listing each rejected claim and the suggested specialist), then the Journalist revises. `auto`: the orchestrator only when the reviewer reports missing evidence. With `orchestrator` or `auto` the reviewer answers in a structured form (`verdict`, `style_issues`, `missing_evidence`); an unparseable reply falls back to the `APPROVED` / `REJECTED:` text protocol, so `reviewer.custom_prompt` keeps working. |
+| `reviewer.max_evidence_loops` | `1` | How many reviewer-triggered orchestrator rounds a run may have. Specialist work stays bounded by `max_agent_calls`. |
+| `reviewer.on_max_revisions` | `flag` | After `max_revision_loops` rejections: `flag` force-approves the next draft and `execute` warns (previous behaviour); `fail` reviews it once more and, if it is still rejected, ends the run with `final_status: failed` and exit code 1. |
+| `reviewer.context` | `[draft]` | What the reviewer reads: add `task` (the research question) and/or `matrix` (this run's traceability-matrix rows, to check that cited claims were logged). |
+| `reviewer.matrix_excerpt_rows` | `50` | How many of this run's matrix rows the reviewer sees with `context: matrix` (the most recent ones). |
+| `collaboration.structured_findings` | `false` | After its research each specialist makes one more call that restates its report as claims (`text`, `epistemic_tag` from `epistemic_tags`, `sources`, `confidence`, `contradicts`). Claims get ids such as `litscout.2.3`, are written to the traceability matrix under the persona's name, and replace the text slice in the orchestrator's and colleagues' views (within the same `max_findings_chars` / `max_peer_chars` budgets). The Journalist reads the full reports and is asked to cite claim ids; with `reviewer.context` including `matrix`, the reviewer gets a check of the cited ids. An unparseable reply keeps the text report. |
+| `collaboration.surface_disagreements` | `false` | Lists claim pairs linked by `contradicts` in the orchestrator's prompt and asks the Journalist for a "Points of disagreement" section. Needs `structured_findings`. |
+| `collaboration.critique_round` | `false` | Before the first hand-over to the Journalist, each specialist with claims gets one pass that asks only for objections to its colleagues' claims. It runs once, counts towards `max_agent_calls` (keeping one call back so the orchestrator can read the objections), and is how specialists dispatched in parallel get to dispute each other's claims. Needs `structured_findings`. |
+
+If a run log or findings file cannot be written (locked file, full disk), the run continues
+and that output is switched off with a warning.
+
+### Resuming a run
+
+With `checkpointer: {type: sqlite}`, `execute` and `report` print a thread id when the run
+starts. If the run crashes, is stopped with Ctrl-C, or is left waiting at a HITL question,
+continue it with:
+
+```bash
+python -m automation.main execute --resume <thread_id>
+```
+
+Steps that finished before the crash are not re-run; the step that failed runs again. A
+pending HITL question is asked again. The saved task is used, so no prompt is needed.
+
+Every row the `append_traceability` tool writes to the traceability matrix names the
+persona that logged it in the Author/Agent column.
 
 ---
 

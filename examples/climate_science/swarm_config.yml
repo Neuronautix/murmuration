@@ -34,13 +34,13 @@ personas:
     icon: "📊"
     role: "Statistical Modeling & Dataset Expert"
     persona_file: "./agents/DataAnalyst/persona.md"
-    tools: [search_literature, search_kb, scrape_page]
+    tools: [search_literature, search_kb, scrape_page, append_traceability]
 
   - name: "Policy Advisor"
     icon: "📜"
     role: "IPCC & Regulatory Framework Expert"
     persona_file: "./agents/PolicyAdvisor/persona.md"
-    tools: [search_web, search_kb]
+    tools: [search_web, search_kb, append_traceability]
 
   - name: "Technical Writer"
     icon: "✍️"

@@ -8,7 +8,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- HITL checkpoints work on Python 3.10: `interrupt()` is now called inside the node's own config context, which LangGraph only sets automatically on 3.11+.
+- A specialist that fails between two successful dispatches keeps its earlier findings; only the failure note is dropped.
+- The traceability-matrix run separator records the thread id of checkpointed runs, and the reviewer's matrix excerpt (`reviewer.context: matrix`) follows that thread across resumes instead of taking whichever run wrote last.
+- **Orchestration quick wins** (see `docs/dev/ORCHESTRATION_AUDIT.md`, findings B1, B3, B6–B10, B12, R4, R7, R8, R11–R15):
+  - An orchestrator decision of `['END']` no longer crashes the run with a `KeyError`; it routes to the Journalist, which is the only way a run can finish.
+  - Per-agent assignments are replaced on every orchestrator pass instead of merged forever, so a stale instruction from an earlier round can no longer shadow new ones.
+  - Reviewer verdicts such as `**APPROVED**` or `APPROVED.` are recognised as approvals instead of burning a revision loop.
+  - Exceptions raised inside a tool are returned to the agent as a tool error message (`handle_tool_errors=True`) instead of aborting the whole run on langgraph ≥ 1.0.
+  - The orchestrator's own token usage is now counted in `run_metrics.json` (`with_structured_output(..., include_raw=True)`).
+  - `post_plan` HITL overrides match exact persona names (comma-separated) instead of substrings; free text is appended to the instructions as `USER REDIRECT` instead of being dropped.
+  - Specialists in the root template and all example packs now have the `append_traceability` tool they were already being instructed to call; the instruction is only injected for agents that actually have the tool.
+  - Traceability-matrix rows escape `|` and newlines so a logged fact can no longer break the table.
+  - `search_pubmed` HTTP calls have a 20 s timeout.
+  - The orchestrator receives compressed findings (default 1500 characters per specialist) instead of every finding verbatim on every routing call.
+  - On revision the Journalist sees its rejected draft under `PREVIOUS DRAFT` instead of disguised as a specialist finding.
+  - Ignored routing targets and deferred Journalist dispatches are noted in the orchestrator's progress message.
+  - An explicit LangGraph `recursion_limit` is derived from `max_agent_calls` and `max_revision_loops`.
+
+- **Orchestration robustness** (audit findings B4, B5, B13–B15, R1, R3):
+  - HITL checkpoints are separate nodes that make no LLM calls, so resuming after `post_plan` or `on_rejection` runs exactly the plan or verdict you answered. Previously the routing or reviewer call was replayed on resume and could produce a different result.
+  - The `pre_journalist` framing and the orchestrator's instructions now reach the Journalist, on every draft. They were silently dropped before.
+  - A specialist or Journalist that is still calling tools when `max_tool_rounds_per_agent` runs out gets one final call without tools and reports what it found, instead of returning empty text.
+  - An empty draft is rejected without a reviewer call; if it stays empty the run reports failure instead of "Task complete".
+  - A model error in one agent no longer aborts the run: the failure is recorded and the other agents' findings are kept. An unusable routing reply is retried once.
+  - A specialist dispatched twice keeps its earlier findings; duplicate targets in one decision are dispatched once.
+  - Builder commands (`persona add`, `team configure`, …) no longer drop config keys they do not model, such as `output_sections`, `reviewer.custom_prompt` or a cross-provider `reviewer.model.provider`.
+  - Message content returned as a list of blocks (Anthropic-style) is handled by the reviewer and all agents.
+
+- **Traceability provenance** (audit finding B12): matrix rows written by `append_traceability_matrix` name the persona that logged them (specialist, Journalist or orchestrator) instead of `**Auto-Agent**`. The graph node passes the persona name to its tools in the `RunnableConfig` metadata; a call made outside the graph still writes `Auto-Agent`. The tool's arguments are unchanged.
+
+### Added
+- **`collaboration: {structured_findings, surface_disagreements, critique_round}`** (all default `false`, audit I2): specialists can report claim objects with ids, epistemic tags, sources, confidence and contradictions; claims are logged to the traceability matrix and are what the orchestrator and colleagues see; disagreements can be surfaced to the orchestrator and the Journalist; a bounded critique round asks each specialist for objections to its colleagues' claims; and the reviewer can check the claim ids a draft cites.
+- **Reviewer evidence loop** (audit I1, R2, R10): `reviewer.on_rejection: journalist|orchestrator|auto` (default `journalist`) can send a rejected draft back to the orchestrator, which sees a `REVIEWER REQUESTS` block and dispatches specialists before the Journalist revises; `reviewer.max_evidence_loops` (default 1) bounds it. The reviewer then answers with a structured `ReviewerVerdict` (falling back to the text protocol). `reviewer.on_max_revisions: flag|fail` (default `flag`) chooses between force-approving and failing the run after `max_revision_loops`. `reviewer.context` (default `[draft]`) can add the task and this run's traceability-matrix rows (`reviewer.matrix_excerpt_rows`, default 50).
+- **`orchestrator.early_stop: {enabled, min_rounds}`** (default off): the orchestrator can declare the evidence sufficient (`sufficient_evidence`, `coverage` in its routing decision) and hand over to the Journalist early, once `min_rounds` specialist rounds are done (audit I4).
+- **`checkpointer: {type: none|memory|sqlite, path}`** and **`execute --resume <thread_id>`** / **`report --resume <thread_id>`** (audit R5). With `sqlite` the run state is saved to a file after every step, so a crashed, interrupted or paused run continues from a new process without repeating finished steps. The thread id is printed at start. Defaults are unchanged (`memory` with HITL, otherwise none). The SQLite saver is the optional `persist` extra (`pip install 'murmuration[persist]'`).
+- **`personas[].model`**: any persona (orchestrator and Journalist included) can use its own `{provider, name, temperature, env_key}`, merged over `model` like `reviewer.model` (audit I3). The builder preserves it; `execute` checks each persona's API key.
+- **`orchestrator.max_parallel_agents`** (default `null`, no limit): caps how many specialists run at once when the orchestrator dispatches several in parallel (audit R9).
+- **`swarm.run_log`** (default `false`): a JSON Lines record of every node update — routing decision and reasoning, assignments, reviewer verdict and feedback, HITL answers, token deltas and `final_status` — plus run start and end, including crashes (audit R6).
+- **`swarm.persist_findings`** (default `false`): each specialist's findings are written to `<output_dir>/findings/<persona-slug>.md` as soon as it reports, so a crash before the Journalist keeps them (audit I5).
+- **`orchestrator.on_agent_failure`**: `continue` (default) records a failed agent and keeps going; `abort` stops on the first error.
+- **`orchestrator.allow_tools`** (audit finding B11): when `true`, the orchestrator persona runs a bounded tool loop with its own tools before each routing decision and the routing prompt includes its short report. Default `false` keeps today's behaviour (the orchestrator's tools are not loaded); `swarm doctor` now warns when the orchestrator lists tools that are ignored for that reason. The toxicology, FAIR-NAMs and PIU examples opt in.
+- `execute` and `report` print whether the draft was approved, force-approved after `reviewer.max_revision_loops`, or overridden by the user, and exit with code 1 when no draft was produced.
+- **`journalist.brief`**: the Journalist's task instructions are now a Jinja2 template in `swarm_config.yml` (audit finding B2). The runtime previously hard-coded a psychiatry-specific requirement ("distinguish high engagement from clinical impairment") and two tool names for every domain. The default brief lists `reviewer.required_elements`; the toxicology and HCM examples render their `output_sections` lists, and the PIU example keeps the engagement-vs-impairment rule. `swarm doctor` renders the template and reports errors; the builder round-trips the key.
+- `orchestrator.max_findings_chars` and `orchestrator.max_peer_chars` (documented as commented defaults in `swarm_config.yml`).
+- `model.pricing: {input_per_m, output_per_m}` for the cost estimate in `run_metrics.json`; defaults stay at gpt-4o list prices.
+- `swarm doctor` warns when a specialist with search tools has no traceability tool.
+- `tests/test_orchestration.py`: offline control-flow tests for the supervisor loop; remaining audit findings are strict `xfail` tests.
+- `docs/dev/ORCHESTRATION_AUDIT.md`: verified audit of the orchestration layer with ranked recommendations.
+
 ### Changed
+- The findings views shown to the orchestrator (`max_findings_chars`) and to other specialists (`max_peer_chars`) now end at a paragraph, sentence or word boundary instead of mid-word, so they can be slightly shorter than the limit (audit I6).
 - **Renamed the project from Research Swarm to Murmuration.** The Python package is now `murmuration` (`pip show murmuration`) and HTTP tools send `User-Agent: Murmuration/1.0`. The CLI (`swarm`), import package (`automation`) and `swarm_config.yml` schema are unchanged.
 - Repository moved from `dhuzard/metodax` (METODAX) to `Neuronautix/murmuration`. Project URLs in `pyproject.toml`, `CITATION.cff`, README, QUICKSTART, CONTRIBUTING and FAQ now point to the new location; they previously pointed to `dhuzard/piu-psych-swarm`.
 

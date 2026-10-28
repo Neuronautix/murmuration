@@ -27,6 +27,13 @@ swarm:
   description: "Autonomous research swarm for [your domain]"
   output_dir: "./Drafts"
   traceability_matrix: "./Knowledge_Traceability_Matrix.md"
+  # run_log:           JSON Lines record of every node update (routing reasoning,
+  #                    assignments, reviewer verdicts, HITL answers, token deltas).
+  #                    A file path, or false to disable (default false).
+  # persist_findings:  write each specialist's findings to <output_dir>/findings/
+  #                    as soon as it reports, so a crash cannot lose them (default false).
+  # run_log: "./Drafts/run_log.jsonl"
+  # persist_findings: true
 
 # ── Orchestrator Settings ────────────────────────────
 # Controls the multi-agent supervisor pattern.
@@ -34,11 +41,39 @@ swarm:
 # journalist:               persona name that writes final structured output
 # max_agent_calls:          total specialist invocations before forcing Journalist
 # max_tool_rounds_per_agent: tool-use loop limit inside each specialist call
+# max_findings_chars:       characters of each specialist's findings shown to the
+#                           orchestrator when it decides the next step (default 1500)
+# max_peer_chars:           characters of each colleague's findings shown to a
+#                           specialist as context (default 600). Both views are cut
+#                           at a paragraph or sentence end, not mid-word
+# on_agent_failure:         what to do when an agent's model call fails (default
+#                           "continue": record the failure and keep the other
+#                           findings; "abort": stop the run on the first error)
+# allow_tools:              let the orchestrator persona use its own tools for quick
+#                           checks before each routing decision, bounded by
+#                           max_tool_rounds_per_agent (default false: its tools
+#                           are not loaded and it only routes)
+# early_stop:               {enabled, min_rounds}. When enabled, the orchestrator may
+#                           declare the evidence sufficient (with a coverage note for
+#                           the Journalist) and the run goes straight to the Journalist,
+#                           once min_rounds specialist rounds are done (default
+#                           {enabled: false, min_rounds: 1})
+# max_parallel_agents:      how many specialists may run at once when the orchestrator
+#                           dispatches several in parallel; the rest wait their
+#                           turn (default null: no limit). Helps with rate limits.
 orchestrator:
   agent: "Orchestrator"
   journalist: "Journalist"
   max_agent_calls: 8
   max_tool_rounds_per_agent: 5
+  # max_findings_chars: 1500
+  # max_peer_chars: 600
+  # on_agent_failure: continue
+  # allow_tools: false
+  # max_parallel_agents: 3
+  # early_stop:
+  #   enabled: true
+  #   min_rounds: 2
 
 # ── LLM Backend ─────────────────────────────────────
 # Supported providers: openai, anthropic, google
@@ -49,6 +84,11 @@ model:
   name: "gpt-4o"
   temperature: 0.2
   env_key: "OPENAI_API_KEY"
+  # Optional: list prices used for the cost estimate in Drafts/run_metrics.json.
+  # Defaults are gpt-4o list prices; set these when you change the model.
+  # pricing:
+  #   input_per_m: 2.50
+  #   output_per_m: 10.00
 
 # ── Personas ─────────────────────────────────────────
 # Each persona has a name, icon, role description, a persona file
@@ -58,6 +98,20 @@ model:
 # To add a persona: python -m automation.main persona add
 # To edit a persona: python -m automation.main persona edit
 # To preview the team: python -m automation.main preview
+#
+# Optional per-persona model: add a `model:` block to any persona (orchestrator
+# and Journalist included). It is merged over the `model:` section below, like
+# reviewer.model, so give only what differs. Keys: provider, name, temperature,
+# env_key. Example — a cheaper model for a narrow specialist:
+#   - name: "LitScout"
+#     ...
+#     model:
+#       name: "gpt-4o-mini"
+#       temperature: 0.1
+# env_key only names the variable `execute` checks; the client reads its provider's
+# standard variable. Switching provider without env_key checks that provider's
+# standard variable (OPENAI_API_KEY, ANTHROPIC_API_KEY or GOOGLE_API_KEY).
+# The cost estimate in run_metrics.json still uses model.pricing for every token.
 personas:
   - name: "Orchestrator"
     icon: "👑"
@@ -82,6 +136,7 @@ personas:
       - you_research
       - lookup_doi
 
+      - append_traceability
   - name: "Specialist2"
     icon: "📊"
     role: "Domain specialist 2 — rename and customize for your second area of expertise"
@@ -95,6 +150,7 @@ personas:
       - you_research
       - lookup_doi
 
+      - append_traceability
   - name: "LitScout"
     icon: "📚"
     role: "Literature cartographer — citation chaining, landmark-paper identification, author-trail expansion"
@@ -106,6 +162,7 @@ personas:
       - lookup_doi
       - scrape_page
 
+      - append_traceability
   - name: "Journalist"
     icon: "✍️"
     role: "Observer & Scribe — structured, neutral final output"
@@ -181,6 +238,28 @@ tools:
     function: "git_commit_snapshot"
     description: "Commit swarm output files (Drafts/ and traceability matrix) to git"
 
+# ── Journalist Brief ─────────────────────────────────
+# Instructions appended to the Journalist's task message on every run (and
+# every revision). This is where domain-specific output requirements belong —
+# mandatory sections, tables, framing rules — not in Python.
+#
+# The brief is a Jinja2 template. It can read any top-level key of this file
+# (e.g. `reviewer`, `epistemic_tags`, or a custom `output_sections` list) plus:
+#   required_elements  — reviewer.required_elements
+#   tool_names         — the Journalist's tools, by function name
+#   journalist_name    — the Journalist persona's name
+# When omitted, the default brief lists `reviewer.required_elements` as bullets
+# and tells the Journalist to save its output with its writing tool.
+#
+# journalist:
+#   brief: |
+#     Write a complete structured output. You MUST include:
+#     {% for item in required_elements %}
+#       • {{ item }}
+#     {% endfor %}
+#       • A section comparing [construct A] with [construct B]
+#     Save each section with your writing tool, then create a version snapshot.
+
 # ── Reviewer-2 (Adversarial Checkpoint) ──────────────
 # The Reviewer gates all final outputs. Customize its
 # constraints for your domain's epistemological standards.
@@ -241,6 +320,28 @@ reviewer:
   #   temperature: 0.8
   #   env_key: "GOOGLE_API_KEY"
 
+  # ── What happens after a rejection (all optional; defaults shown) ──────────
+  # on_rejection:  journalist   — the Journalist revises alone (default)
+  #                orchestrator — the orchestrator first gathers more evidence for the
+  #                               rejected claims, then the Journalist revises
+  #                auto         — orchestrator only when the reviewer reports missing
+  #                               evidence, otherwise the Journalist
+  #                With orchestrator/auto the reviewer answers in a structured form
+  #                (verdict, style_issues, missing_evidence); if that fails, the
+  #                APPROVED / REJECTED: text protocol is used, so custom_prompt still works.
+  # max_evidence_loops: 1       — reviewer-triggered orchestrator rounds per run
+  # on_max_revisions: flag      — after max_revision_loops rejections the next draft is
+  #                               force-approved and flagged (default); "fail" reviews it
+  #                               once more and fails the run if it is still rejected
+  # context: [draft]            — what the reviewer sees; add "task" and/or "matrix"
+  #                               (this run's traceability rows, to check citations)
+  # matrix_excerpt_rows: 50     — matrix rows shown with context: matrix
+  # on_rejection: auto
+  # max_evidence_loops: 1
+  # on_max_revisions: flag
+  # context: [draft, task, matrix]
+  # matrix_excerpt_rows: 50
+
   # Optional: Override the auto-generated reviewer prompt entirely.
   # Uncomment and edit to use a fully custom reviewer prompt.
   # custom_prompt: |
@@ -264,6 +365,42 @@ hitl:
     - post_plan
     - pre_journalist
     - on_rejection
+
+# ── Checkpointer (crash and HITL resume) ─────────────
+# Where LangGraph saves the run state after every step.
+#   none    — nothing is saved (default when HITL is off)
+#   memory  — kept in memory while the process runs (default when HITL is on)
+#   sqlite  — saved to a file, so a run that crashed, was stopped with Ctrl-C, or is
+#             waiting at a HITL question can be continued later from a new process:
+#               python -m automation.main execute --resume <thread_id>
+#             The thread id is printed when the run starts. Needs the optional extra:
+#               pip install 'murmuration[persist]'
+#             path defaults to ./.murmuration/checkpoints.sqlite. Keep it out of
+#             output_dir: git_commit_snapshot commits that folder.
+# checkpointer:
+#   type: sqlite
+#   path: "./.murmuration/checkpoints.sqlite"
+
+# ── Collaboration (claim-level findings) ─────────────
+# structured_findings:   after its research, each specialist restates its report as
+#                        claims {text, epistemic_tag, sources, confidence, contradicts}.
+#                        Claims get ids such as litscout.2.3, are logged to the
+#                        traceability matrix with the persona's name, and are what
+#                        the orchestrator and colleagues see (instead of a text slice).
+#                        Tags come from epistemic_tags below. Costs one extra model
+#                        call per specialist turn (default false).
+# surface_disagreements: list claims that dispute each other (via `contradicts`) for
+#                        the orchestrator and ask the Journalist for a "Points of
+#                        disagreement" section (needs structured_findings).
+# critique_round:        before the first hand-over to the Journalist, every specialist
+#                        with claims gets one objections-only pass on its colleagues'
+#                        claims, within max_agent_calls (needs structured_findings).
+# With reviewer.context including matrix, the reviewer also gets a check of the
+# claim ids the draft cites against this run's claims.
+# collaboration:
+#   structured_findings: true
+#   surface_disagreements: true
+#   critique_round: false
 
 # ── Epistemic Tags ───────────────────────────────────
 # Tags used to classify knowledge claims in the traceability matrix.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automation.builder.models import PersonaSpec, SwarmSpec, ToolSpec
+from automation.builder.models import PersonaSpec, SwarmSpec, ToolSpec, collect_extra_config
 from automation.config import load_config
 
 
@@ -67,7 +67,7 @@ def load_swarm_spec_from_disk(root_dir: Path) -> SwarmSpec:
                 fallback_icon=persona.get("icon", "🤖"),
                 fallback_role=persona.get("role", "Role"),
                 tools=persona.get("tools", []),
-            )
+            ).model_copy(update={"model": persona.get("model") or None})
         )
 
     reviewer = config.get("reviewer", {})
@@ -82,7 +82,7 @@ def load_swarm_spec_from_disk(root_dir: Path) -> SwarmSpec:
     orchestrator = config.get("orchestrator", {})
     hitl = config.get("hitl", {})
 
-    return SwarmSpec(
+    spec = SwarmSpec(
         swarm_name=swarm.get("name", "Swarm"),
         swarm_description=swarm.get("description", "Generated swarm"),
         domain=swarm.get("name", "General Research"),
@@ -108,5 +108,9 @@ def load_swarm_spec_from_disk(root_dir: Path) -> SwarmSpec:
         hitl_enabled=hitl.get("enabled", False),
         hitl_checkpoints=hitl.get("checkpoints", []),
         epistemic_tags=config.get("epistemic_tags", ["[FACT]", "[INFERENCE]", "[SPECULATION]"]),
+        journalist_brief=(config.get("journalist") or {}).get("brief"),
         tool_registry=tool_registry,
     )
+    # Keep every config value the spec does not model, so a builder rewrite of
+    # swarm_config.yml preserves it (see SwarmSpec.extra_config).
+    return spec.model_copy(update={"extra_config": collect_extra_config(config, spec.to_config())})

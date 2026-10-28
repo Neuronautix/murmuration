@@ -26,6 +26,9 @@ class PersonaSpec(BaseModel):
     core_mission: str
     kb_focus: list[str] = Field(default_factory=list)
     behavior_rules: list[str] = Field(default_factory=list)
+    # Optional personas[].model override ({provider, name, temperature, env_key}), merged
+    # over the swarm model at runtime. Modelled explicitly: extra_config does not reach list items.
+    model: dict[str, Any] | None = None
 
     @field_validator("name", "role", "core_mission")
     @classmethod
@@ -103,6 +106,14 @@ class SwarmSpec(BaseModel):
         "[INFERENCE]",
         "[SPECULATION]",
     ])
+    # Optional Jinja2 template for the Journalist's task brief (journalist.brief).
+    # None means the runtime default in automation.config.DEFAULT_JOURNALIST_BRIEF.
+    journalist_brief: str | None = None
+    # Config values the spec does not model (e.g. output_sections, reviewer.custom_prompt,
+    # orchestrator.on_agent_failure, reviewer.model.provider), as (key path, value) pairs.
+    # Captured by the loader and written back by to_config() so builder commands that
+    # rewrite swarm_config.yml never silently drop them.
+    extra_config: list[tuple[tuple[str, ...], Any]] = Field(default_factory=list)
     tool_registry: dict[str, ToolSpec]
 
     @field_validator("swarm_name", "swarm_description", "domain", "model_provider", "model_name", "model_env_key")
@@ -184,7 +195,7 @@ class SwarmSpec(BaseModel):
                 "temperature": self.reviewer_model_temperature,
             }
 
-        return {
+        config = {
             "swarm": {
                 "name": self.swarm_name,
                 "description": self.swarm_description,
@@ -210,6 +221,7 @@ class SwarmSpec(BaseModel):
                     "role": persona.role,
                     "persona_file": persona.persona_file,
                     "tools": persona.tools,
+                    **({"model": dict(persona.model)} if persona.model else {}),
                 }
                 for persona in self.personas
             ],
@@ -223,4 +235,40 @@ class SwarmSpec(BaseModel):
                 "checkpoints": self.hitl_checkpoints,
             },
             "epistemic_tags": self.epistemic_tags,
+            **({"journalist": {"brief": self.journalist_brief}} if self.journalist_brief else {}),
         }
+        return apply_extra_config(config, self.extra_config)
+
+
+def collect_extra_config(original: dict, generated: dict, prefix: tuple[str, ...] = ()) -> list:
+    """Return (path, value) pairs present in ``original`` but missing from ``generated``.
+
+    Recurses into mappings only; lists (personas, checkpoints …) are modelled by
+    the spec as a whole. Values the spec models but changed are not extras.
+    """
+    extras = []
+    for key, value in original.items():
+        path = prefix + (key,)
+        if key not in generated:
+            extras.append((path, value))
+        elif isinstance(value, dict) and isinstance(generated[key], dict):
+            extras.extend(collect_extra_config(value, generated[key], path))
+    return extras
+
+
+def apply_extra_config(config: dict, extras: list) -> dict:
+    """Write extras back into ``config`` without overriding modelled values.
+
+    An extra is only restored when its parent mapping still exists, so removing
+    a modelled block in the builder (e.g. clearing the reviewer model) also
+    removes the unmodelled keys that belonged to it.
+    """
+    for path, value in extras:
+        parent = config
+        for key in path[:-1]:
+            parent = parent.get(key) if isinstance(parent, dict) else None
+            if parent is None:
+                break
+        if isinstance(parent, dict) and path[-1] not in parent:
+            parent[path[-1]] = value
+    return config

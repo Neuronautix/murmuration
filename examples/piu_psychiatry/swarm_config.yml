@@ -25,6 +25,9 @@ orchestrator:
   journalist: "Journalist"
   max_agent_calls: 8
   max_tool_rounds_per_agent: 5
+  # Let the orchestrator persona run quick checks with its listed tools before each
+  # routing decision; without this its tools are ignored (see doctor).
+  allow_tools: true
 
 # ── LLM Backend ─────────────────────────────────────
 # Supported providers: openai, anthropic, google
@@ -62,6 +65,7 @@ personas:
       - you_research
       - lookup_doi
 
+      - append_traceability
   - name: "EpiScope"
     icon: "📊"
     role: "Epidemiologist and psychometrics reviewer"
@@ -75,6 +79,7 @@ personas:
       - you_research
       - lookup_doi
 
+      - append_traceability
   - name: "LitScout"
     icon: "📚"
     role: "Scientific literature cartographer for citation chaining and author-trail expansion"
@@ -86,6 +91,7 @@ personas:
       - lookup_doi
       - scrape_page
 
+      - append_traceability
   - name: "NeuroCogs"
     icon: "🧪"
     role: "Mechanisms and neurocognition specialist"
@@ -99,6 +105,7 @@ personas:
       - you_research
       - lookup_doi
 
+      - append_traceability
   - name: "CarePath"
     icon: "🛟"
     role: "Intervention, prevention, and care pathways specialist"
@@ -112,6 +119,7 @@ personas:
       - you_research
       - lookup_doi
 
+      - append_traceability
   - name: "Journalist"
     icon: "✍️"
     role: "Observer & Scribe"
@@ -185,6 +193,18 @@ tools:
     module: "automation.tools"
     function: "git_commit_snapshot"
     description: "Commit swarm output files (Drafts/ and traceability matrix) to git"
+
+# ── Journalist Brief ─────────────────────────────────
+# Rendered into the Journalist's task message. The engagement-vs-impairment
+# section is the PIU domain's framing rule; it used to live in graph.py.
+journalist:
+  brief: |
+    Write a complete structured output. You MUST include:
+    {% for item in required_elements %}
+      • {{ item }}
+    {% endfor %}
+      • A section explicitly distinguishing high engagement from clinical impairment
+    Save the output to disk with your writing tool, then create a version snapshot.
 
 # ── Reviewer-2 (Adversarial Checkpoint) ──────────────
 # The Reviewer gates all final outputs. Customize its

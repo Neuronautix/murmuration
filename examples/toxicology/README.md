@@ -49,6 +49,14 @@ make run PROMPT="Map the metadata needed to compare 90-day rat oral toxicity stu
 A live run needs the usual model and search credentials. Offline configuration
 checks are in `tests/test_example_packs.py`.
 
+The Journalist persona asks it to "insert [SOURCE NEEDED] and notify Dr. Nexus"
+when a claim lacks a traceable source. The Journalist cannot route the run
+itself, but the reviewer can: with `reviewer.on_rejection: auto` (and optionally
+`reviewer.context: [draft, task, matrix]`), a draft with unsupported claims is
+sent back to Dr. Nexus, who dispatches specialists to source them before the
+Journalist revises. The pack keeps the default (`journalist`) so its runs are
+unchanged; add the key to `swarm_config.yml` to turn this on.
+
 ## Adaptations from the donor
 
 - `swarm_config_tocsas.yml` became `swarm_config.yml`, and persona paths now
@@ -56,8 +64,9 @@ checks are in `tests/test_example_packs.py`.
 - The traceability matrix path is `./Knowledge_Traceability_Matrix_TOCSAS.md`.
 - In-text references to `swarm_config_tocsas.yml` in the Dr. Nexus and
   Journalist personas now name `examples/toxicology/swarm_config.yml`.
-- `output_sections` is kept for reference. The runtime does not read it: the
-  sections are enforced through the personas and the reviewer rules.
+- `output_sections` is read by the `journalist.brief` template in
+  `swarm_config.yml`, which renders the section list into the Journalist's task
+  message; the personas and the reviewer rules reinforce it.
 - Each `KB/README.md` is kept as written. Some of them list planned KB files
   that the donor never created. Only the files present here exist.
 

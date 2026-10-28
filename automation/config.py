@@ -11,11 +11,14 @@ A user should NEVER need to edit this file. All customization flows
 through swarm_config.yml and agents/*/persona.md files.
 """
 
+import contextlib
 import importlib
 import os
+import re
 from pathlib import Path
 from typing import Any
 
+import jinja2
 import yaml
 from rich.console import Console
 
@@ -47,7 +50,206 @@ def load_config(config_path: Path = CONFIG_PATH) -> dict:
             f"Please refer to the example configuration."
         )
 
+    _validate_orchestrator_options(config.get("orchestrator") or {})
+
+    journalist = config.get("journalist")
+    if journalist is not None:
+        if not isinstance(journalist, dict):
+            raise ValueError("swarm_config.yml: 'journalist' must be a mapping (e.g. journalist: {brief: ...}).")
+        brief = journalist.get("brief")
+        if brief is not None and not isinstance(brief, str):
+            raise ValueError("swarm_config.yml: 'journalist.brief' must be a string (use a YAML block scalar '|').")
+
+    _validate_options(config)
     return config
+
+
+def _validate_options(config: dict) -> None:
+    """Check the optional keys that tune orchestration; raise ValueError naming the key path."""
+    swarm = config.get("swarm") or {}
+    run_log = swarm.get("run_log")
+    if run_log is not None and run_log is not False and not (isinstance(run_log, str) and run_log.strip()):
+        raise ValueError(
+            f"swarm_config.yml: swarm.run_log must be a file path or false, not {run_log!r}."
+        )
+    persist = swarm.get("persist_findings")
+    if persist is not None and not isinstance(persist, bool):
+        raise ValueError(f"swarm_config.yml: swarm.persist_findings must be true or false, not {persist!r}.")
+
+    _validate_checkpointer(config)
+    _validate_reviewer_options(config.get("reviewer") or {})
+    _validate_collaboration(config.get("collaboration"), config.get("personas") or [])
+
+    for persona in config.get("personas") or []:
+        if not isinstance(persona, dict):
+            continue  # malformed entries are reported by doctor / fail in get_persona_config
+        _validate_model_override(persona.get("model"), f"personas[{persona.get('name', '?')}].model")
+
+
+COLLABORATION_KEYS = ("structured_findings", "surface_disagreements", "critique_round")
+
+
+def _validate_collaboration(block, personas: list) -> None:
+    if block is None:
+        return
+    if not isinstance(block, dict):
+        raise ValueError("swarm_config.yml: collaboration must be a mapping of "
+                         f"{', '.join(COLLABORATION_KEYS)} to true/false.")
+    for key, value in block.items():
+        if key not in COLLABORATION_KEYS:
+            raise ValueError(f"swarm_config.yml: collaboration.{key} is not supported; "
+                             f"use {', '.join(COLLABORATION_KEYS)}.")
+        if not isinstance(value, bool):
+            raise ValueError(f"swarm_config.yml: collaboration.{key} must be true or false, not {value!r}.")
+    for key in ("surface_disagreements", "critique_round"):
+        if block.get(key) and not block.get("structured_findings"):
+            raise ValueError(
+                f"swarm_config.yml: collaboration.{key} needs collaboration.structured_findings: true "
+                "(it works on claim objects)."
+            )
+    if block.get("structured_findings"):
+        by_slug: dict = {}
+        for persona in personas:
+            if isinstance(persona, dict):
+                by_slug.setdefault(findings_slug(persona.get("name", "")), []).append(persona.get("name", ""))
+        for slug, names in by_slug.items():
+            if len(names) > 1:
+                raise ValueError(
+                    f"swarm_config.yml: collaboration.structured_findings: personas {', '.join(names)} would "
+                    f"share the claim-id prefix '{slug}'; rename one of them."
+                )
+
+
+REVIEWER_CONTEXT_ITEMS = ("draft", "task", "matrix")
+
+
+def _validate_reviewer_options(reviewer: dict) -> None:
+    def whole(key, minimum, default):
+        value = reviewer.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise ValueError(
+                f"swarm_config.yml: reviewer.{key} must be a whole number of at least {minimum}, not {value!r}."
+            )
+
+    on_rejection = reviewer.get("on_rejection", "journalist")
+    if on_rejection not in ("journalist", "orchestrator", "auto"):
+        raise ValueError(
+            f"swarm_config.yml: reviewer.on_rejection must be journalist, orchestrator or auto, not {on_rejection!r}."
+        )
+    on_max = reviewer.get("on_max_revisions", "flag")
+    if on_max not in ("flag", "fail"):
+        raise ValueError(f"swarm_config.yml: reviewer.on_max_revisions must be flag or fail, not {on_max!r}.")
+    whole("max_evidence_loops", 0, 1)
+    whole("matrix_excerpt_rows", 1, 50)
+    context = reviewer.get("context", ["draft"])
+    if not isinstance(context, list) or not context or any(c not in REVIEWER_CONTEXT_ITEMS for c in context):
+        raise ValueError(
+            f"swarm_config.yml: reviewer.context must be a non-empty list drawn from "
+            f"{', '.join(REVIEWER_CONTEXT_ITEMS)}, not {context!r}."
+        )
+    if "draft" not in context:
+        raise ValueError("swarm_config.yml: reviewer.context must include draft (the text under review).")
+
+
+CHECKPOINTER_TYPES = ("none", "memory", "sqlite")
+
+
+def _validate_checkpointer(config: dict) -> None:
+    block = config.get("checkpointer")
+    if block is None:
+        return
+    if not isinstance(block, dict):
+        raise ValueError("swarm_config.yml: checkpointer must be a mapping such as {type: sqlite, path: ...}.")
+    kind = block.get("type")
+    if kind not in CHECKPOINTER_TYPES:
+        raise ValueError(
+            f"swarm_config.yml: checkpointer.type must be one of {', '.join(CHECKPOINTER_TYPES)}, not {kind!r}."
+        )
+    path = block.get("path")
+    if path is not None and not (isinstance(path, str) and path.strip()):
+        raise ValueError("swarm_config.yml: checkpointer.path must be a file path.")
+    if path is not None and kind != "sqlite":
+        raise ValueError("swarm_config.yml: checkpointer.path is only used with checkpointer.type: sqlite.")
+    if kind == "none" and (config.get("hitl") or {}).get("enabled"):
+        raise ValueError(
+            "swarm_config.yml: checkpointer.type: none cannot be used with hitl.enabled: true; "
+            "HITL checkpoints need a checkpointer to pause and resume (use memory or sqlite)."
+        )
+
+
+SUPPORTED_PROVIDERS = ("openai", "anthropic", "google")
+# The variable each provider's LangChain client reads its API key from.
+PROVIDER_ENV_KEYS = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "google": "GOOGLE_API_KEY"}
+MODEL_OVERRIDE_KEYS = ("provider", "name", "temperature", "env_key")
+
+
+def _validate_model_override(override, path: str) -> None:
+    """A per-persona model block: a mapping of provider/name/temperature/env_key (all optional)."""
+    if override is None:
+        return
+    if not isinstance(override, dict):
+        raise ValueError(f"swarm_config.yml: {path} must be a mapping such as {{name: gpt-4o-mini}}.")
+    unknown = sorted(set(override) - set(MODEL_OVERRIDE_KEYS))
+    if unknown:
+        raise ValueError(
+            f"swarm_config.yml: {path}.{unknown[0]} is not supported; use {', '.join(MODEL_OVERRIDE_KEYS)}."
+        )
+    if "provider" in override and override["provider"] not in SUPPORTED_PROVIDERS:
+        raise ValueError(
+            f"swarm_config.yml: {path}.provider must be one of {', '.join(SUPPORTED_PROVIDERS)}, "
+            f"not {override['provider']!r}."
+        )
+    for key in ("name", "env_key"):
+        if key in override and not (isinstance(override[key], str) and override[key].strip()):
+            raise ValueError(f"swarm_config.yml: {path}.{key} must be a non-empty string.")
+    temperature = override.get("temperature")
+    if "temperature" in override and (
+        isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not 0 <= temperature <= 2
+    ):
+        raise ValueError(f"swarm_config.yml: {path}.temperature must be a number between 0 and 2.")
+
+
+def _validate_orchestrator_options(orchestrator: dict) -> None:
+    """Reject orchestrator options whose type or value the graph cannot use."""
+    failure_policy = orchestrator.get("on_agent_failure", "continue")
+    if failure_policy not in ("continue", "abort"):
+        raise ValueError(
+            f"swarm_config.yml: orchestrator.on_agent_failure must be 'continue' or 'abort', "
+            f"not {failure_policy!r}."
+        )
+    allow_tools = orchestrator.get("allow_tools", False)
+    if not isinstance(allow_tools, bool):
+        raise ValueError(
+            f"swarm_config.yml: orchestrator.allow_tools must be true or false, not {allow_tools!r}."
+        )
+    early_stop = orchestrator.get("early_stop")
+    if early_stop is not None:
+        if not isinstance(early_stop, dict):
+            raise ValueError("swarm_config.yml: orchestrator.early_stop must be a mapping {enabled, min_rounds}.")
+        unknown = sorted(set(early_stop) - {"enabled", "min_rounds"})
+        if unknown:
+            raise ValueError(f"swarm_config.yml: orchestrator.early_stop.{unknown[0]} is not supported; "
+                             "use enabled and min_rounds.")
+        if not isinstance(early_stop.get("enabled", False), bool):
+            raise ValueError("swarm_config.yml: orchestrator.early_stop.enabled must be true or false.")
+        min_rounds = early_stop.get("min_rounds", 1)
+        if isinstance(min_rounds, bool) or not isinstance(min_rounds, int) or min_rounds < 1:
+            raise ValueError(
+                f"swarm_config.yml: orchestrator.early_stop.min_rounds must be a whole number of at least 1, "
+                f"not {min_rounds!r}."
+            )
+    max_parallel = orchestrator.get("max_parallel_agents")
+    if max_parallel is not None and (isinstance(max_parallel, bool) or not isinstance(max_parallel, int)
+                                     or max_parallel < 1):
+        raise ValueError(
+            f"swarm_config.yml: orchestrator.max_parallel_agents must be a whole number of at least 1 "
+            f"or null (no limit), not {max_parallel!r}."
+        )
+
+
+# RunnableConfig metadata key carrying the calling persona's name from a graph node
+# to its tools (read by append_traceability_matrix for the matrix's Author/Agent column).
+AGENT_METADATA_KEY = "murmuration_agent"
 
 
 SWARM_PATH_DEFAULTS = {
@@ -70,8 +272,23 @@ def resolve_swarm_path(config: dict | None, key: str) -> Path:
         except (FileNotFoundError, ValueError, yaml.YAMLError):
             config = {}
     raw = (config.get("swarm") or {}).get(key) or SWARM_PATH_DEFAULTS[key]
+    return _resolve_project_path(raw)
+
+
+def _resolve_project_path(raw: str) -> Path:
     path = Path(raw).expanduser()
     return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
+
+
+def get_run_log_path(config: dict) -> Path | None:
+    """Resolve ``swarm.run_log``; None when the run log is off (the default)."""
+    raw = (config.get("swarm") or {}).get("run_log")
+    return _resolve_project_path(raw) if raw else None
+
+
+def findings_slug(name: str) -> str:
+    """File stem for a persona's persisted findings (Unicode letters kept, lower case)."""
+    return re.sub(r"[^\w]+|_+", "-", name).strip("-").lower() or "agent"
 
 
 def load_persona_content(persona_file: str) -> str:
@@ -126,6 +343,57 @@ def build_reviewer_prompt(config: dict) -> str:
 
 
 
+# Default instructions appended to the Journalist's task message. Rendered with
+# Jinja2; see build_journalist_brief() for the available variables. Override it
+# with `journalist.brief` in swarm_config.yml — never by editing this file.
+DEFAULT_JOURNALIST_BRIEF = """\
+Write a complete structured output. You MUST include:
+{% for item in required_elements %}
+  • {{ item }}
+{% else %}
+  • Formal in-text citations [1], [2]…
+  • A limitations section
+  • A complete formal References section at the end
+{% endfor %}
+{% if tool_names %}
+Your tools: {{ tool_names | join(', ') }}. Save the finished output to disk with your
+writing tool before you finish, then create a version snapshot if you have a snapshot tool.
+{% endif %}
+"""
+
+
+def build_journalist_brief(config: dict, tool_names: list | None = None) -> str:
+    """Render the Journalist's task brief from ``journalist.brief`` (or the default).
+
+    The template is Jinja2 and sees every top-level key of swarm_config.yml
+    (``swarm``, ``reviewer``, ``epistemic_tags``, ``output_sections`` …) plus:
+
+      required_elements  reviewer.required_elements (list of str)
+      tool_names         names of the tools bound to the Journalist (list of str)
+      journalist_name    the Journalist persona's name
+
+    Undefined variables are an error so a typo in the template fails at build
+    time (and in ``swarm doctor``) rather than silently producing an empty brief.
+    """
+    template_src = (config.get("journalist") or {}).get("brief") or DEFAULT_JOURNALIST_BRIEF
+    env = jinja2.Environment(undefined=jinja2.StrictUndefined, trim_blocks=True, lstrip_blocks=True,
+                             keep_trailing_newline=False, autoescape=False)
+    context = dict(config)
+    context.update({
+        "required_elements": list((config.get("reviewer") or {}).get("required_elements") or []),
+        "tool_names": list(tool_names or []),
+        "journalist_name": (config.get("orchestrator") or {}).get("journalist", "Journalist"),
+    })
+    try:
+        rendered = env.from_string(template_src).render(**context)
+    except jinja2.TemplateError as e:
+        raise ValueError(f"swarm_config.yml: journalist.brief failed to render: {e}") from e
+    rendered = rendered.strip()
+    if not rendered:
+        raise ValueError("swarm_config.yml: journalist.brief rendered to an empty string.")
+    return rendered
+
+
 def get_persona_config(config: dict, persona_name: str) -> dict:
     """Return the full config dict for a single persona, with persona.md content loaded.
 
@@ -174,11 +442,17 @@ def load_tools_for_persona(config: dict, persona_cfg: dict) -> list:
     return tool_functions
 
 
-def build_agent_system_prompt(persona_cfg: dict, epistemic_tags: list = None) -> str:
+def build_agent_system_prompt(persona_cfg: dict, epistemic_tags: list = None,
+                              tool_names: list = None) -> str:
     """Build a focused system prompt for a single agent node.
 
     Injects only this agent's persona content — not all agents — keeping
     per-call token cost proportional to one persona rather than the full swarm.
+
+    ``tool_names`` are the names of the tools actually bound to this agent. When
+    given, the traceability-logging instruction is only emitted if the agent has
+    a tool that writes to the matrix; otherwise the agent would be told to call
+    a tool it cannot see.
     """
     name = persona_cfg.get("name", "Agent")
     icon = persona_cfg.get("icon", "🤖")
@@ -189,11 +463,10 @@ def build_agent_system_prompt(persona_cfg: dict, epistemic_tags: list = None) ->
 
     if epistemic_tags:
         tags_str = ", ".join(epistemic_tags)
-        prompt += (
-            f"\n\nEPISTEMIC TAGS: Classify every claim with one of: {tags_str}\n"
-            "After every literature or web search, call `append_traceability_matrix` immediately.\n"
-            "Include formal in-text citations in all outputs."
-        )
+        prompt += f"\n\nEPISTEMIC TAGS: Classify every claim with one of: {tags_str}\n"
+        if tool_names is None or "append_traceability_matrix" in tool_names:
+            prompt += "After every literature or web search, call `append_traceability_matrix` immediately.\n"
+        prompt += "Include formal in-text citations in all outputs."
 
     return prompt
 
@@ -227,6 +500,24 @@ def create_model(config: dict) -> Any:
         )
 
 
+def persona_model_config(config: dict, persona_cfg: dict) -> dict | None:
+    """The model spec for one persona: ``personas[].model`` merged over ``model``.
+
+    Returns None when the persona has no override, so callers can share the base
+    model instance. Works like ``reviewer.model``: only the keys that differ need
+    to be given.
+    """
+    override = persona_cfg.get("model")
+    if not override:
+        return None
+    merged = {**config["model"], **override}
+    # A provider switch without its own env_key checks that provider's standard
+    # variable, not the base model's (which belongs to another provider).
+    if "env_key" not in override and merged.get("provider") != config["model"].get("provider", "openai"):
+        merged["env_key"] = PROVIDER_ENV_KEYS.get(merged.get("provider"), merged.get("env_key"))
+    return merged
+
+
 def create_reviewer_model(config: dict) -> Any:
     """Create an LLM instance for Reviewer-2, with optional model/temperature override.
 
@@ -251,6 +542,60 @@ def create_reviewer_model(config: dict) -> Any:
     merged_model_cfg = {**config["model"], **reviewer_model_overrides}
     reviewer_config = {**config, "model": merged_model_cfg}
     return create_model(reviewer_config)
+
+
+def get_checkpointer_config(config: dict) -> dict:
+    """Resolve the top-level ``checkpointer`` block to ``{"type", "path"}``.
+
+    Default: ``memory`` when HITL is on (interrupts need one), otherwise ``none``,
+    which is the behaviour before the key existed. ``sqlite`` persists every step
+    to ``path`` (default ``./.murmuration/checkpoints.sqlite``) so a crashed or
+    paused run can be resumed from another process with ``--resume``. The default
+    is deliberately outside ``output_dir``: git_commit_snapshot force-adds that
+    folder, and the database is binary and holds the full run state.
+    """
+    block = config.get("checkpointer") or {}
+    kind = block.get("type") or ("memory" if (config.get("hitl") or {}).get("enabled") else "none")
+    path = None
+    if kind == "sqlite":
+        raw = block.get("path")
+        path = _resolve_project_path(raw or DEFAULT_CHECKPOINT_PATH)
+    return {"type": kind, "path": path}
+
+
+DEFAULT_CHECKPOINT_PATH = "./.murmuration/checkpoints.sqlite"
+SQLITE_EXTRA_HINT = "pip install 'murmuration[persist]'  (installs langgraph-checkpoint-sqlite)"
+
+
+def sqlite_saver_class():
+    """Import the async SQLite saver from the optional ``persist`` extra."""
+    try:
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    except ImportError as e:
+        raise RuntimeError(
+            f"checkpointer.type: sqlite needs the optional 'persist' extra: {SQLITE_EXTRA_HINT}"
+        ) from e
+    return AsyncSqliteSaver
+
+
+@contextlib.asynccontextmanager
+async def open_checkpointer(config: dict):
+    """Yield the checkpointer configured by ``checkpointer`` (None for type none).
+
+    The SQLite saver holds an aiosqlite connection bound to the running event
+    loop, so it must be opened inside it, around graph compilation and the run.
+    """
+    settings = get_checkpointer_config(config)
+    if settings["type"] == "memory":
+        from langgraph.checkpoint.memory import MemorySaver
+        yield MemorySaver()
+    elif settings["type"] == "sqlite":
+        saver_class = sqlite_saver_class()
+        settings["path"].parent.mkdir(parents=True, exist_ok=True)
+        async with saver_class.from_conn_string(str(settings["path"])) as saver:
+            yield saver
+    else:
+        yield None
 
 
 def get_hitl_config(config: dict) -> dict:
@@ -282,6 +627,19 @@ def validate_env(config: dict) -> list[str]:
             f"Required environment variable '{required_key}' is not set.\n"
             f"Copy .env.example to .env and add your API key."
         )
+
+    # Personas with their own model (personas[].model) may need a different key.
+    for persona in config.get("personas", []):
+        merged = persona_model_config(config, persona)
+        if merged is None:
+            continue
+        persona_key = merged.get("env_key", "OPENAI_API_KEY")
+        if not os.getenv(persona_key):
+            raise EnvironmentError(
+                f"Environment variable '{persona_key}' is not set; persona '{persona.get('name')}' "
+                f"uses it for its own model (personas[].model).\n"
+                f"Add it to .env, or set personas[].model.env_key."
+            )
 
     # Check tool-specific optional keys — map function name → env var.
     # Collect tool names per missing key to emit one consolidated warning each.

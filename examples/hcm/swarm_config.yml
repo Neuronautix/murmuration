@@ -57,6 +57,7 @@ personas:
       - lookup_doi
       - scrape_page
 
+      - append_traceability
   - name: "HCM Methodology Lead"
     icon: "🔬"
     role: "Hardware, sensor, classifier pipeline, and cross-platform comparability specialist"
@@ -69,6 +70,7 @@ personas:
       - scrape_page
       - lookup_doi
 
+      - append_traceability
   - name: "Behavioral Interpretation Lead"
     icon: "🐭"
     role: "Operational behavioral definitions, ethological validity, and translational limits"
@@ -81,6 +83,7 @@ personas:
       - scrape_page
       - lookup_doi
 
+      - append_traceability
   - name: "Metadata Architect"
     icon: "🗂️"
     role: "MNMS extraction, normalization, and metadata structure mapping"
@@ -189,6 +192,25 @@ tools:
     module: "automation.tools"
     function: "git_commit_snapshot"
     description: "Commit HCMSAS output files (Drafts/HCMSAS/ and traceability matrix) to git"
+
+# ── Journalist Brief ─────────────────────────────────
+# Rendered into the Journalist's task message; reads `output_sections` below.
+journalist:
+  brief: |
+    Write the complete HCMSAS synthesis. Produce ALL of the following sections, in order,
+    using these exact headings:
+    {% for section in output_sections %}
+      {{ section }}
+    {% endfor %}
+    A section not yet supported by evidence must still appear, marked [PENDING], with a
+    sentence saying what evidence is missing. Every claim in the evidence summary, the
+    evidence table and the conclusions must carry an in-text citation that appears in the
+    References section. The reviewer will also check:
+    {% for item in required_elements %}
+      • {{ item }}
+    {% endfor %}
+    Save each section to disk with your writing tool as it is completed, then create a
+    version snapshot of the final output.
 
 # ── Reviewer-2 (Adversarial Checkpoint) ──────────────
 reviewer:
