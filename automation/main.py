@@ -459,6 +459,8 @@ async def _run_graph_async(config: dict, prompt: str, graph, run_config: dict,
         "review_route": "",
         "evidence_loop_count": 0,
         "specialist_rounds": 0,
+        "claims": {},
+        "critique_done": False,
         "final_status": "",
         "token_usage": {},
     }

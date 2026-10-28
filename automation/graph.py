@@ -97,6 +97,7 @@ from automation.config import (
     build_reviewer_prompt,
     create_model,
     create_reviewer_model,
+    findings_slug,
     get_checkpointer_config,
     get_hitl_config,
     get_persona_config,
@@ -105,6 +106,7 @@ from automation.config import (
     persona_model_config,
     resolve_swarm_path,
 )
+from automation.tools import matrix_row, write_matrix_rows
 
 # Characters retained from each peer agent's output when shown to another
 # specialist. Keeps cross-agent context lean without losing key facts.
@@ -172,6 +174,8 @@ class GraphState(TypedDict):
     reviewer_requests       Evidence requests from the latest structured rejection.
     review_route            Where the latest rejection goes: journalist or orchestrator.
     evidence_loop_count     Reviewer-triggered orchestrator round-trips (reviewer.max_evidence_loops).
+    claims                  {claim id: claim} from collaboration.structured_findings.
+    critique_done           True once the collaboration.critique_round has been dispatched.
     final_status            approved | force_approved | overridden | completed | failed.
     token_usage             Accumulated token counts across all LLM calls in the run.
     """
@@ -193,6 +197,8 @@ class GraphState(TypedDict):
     reviewer_requests: list    # list[dict]: EvidenceRequest objects from the latest rejection
     review_route: str          # "journalist" | "orchestrator": where the latest rejection goes
     evidence_loop_count: int   # reviewer-triggered orchestrator round-trips so far
+    claims: Annotated[dict, _merge_agent_outputs]   # {claim id: claim dict} (structured findings)
+    critique_done: bool        # collaboration.critique_round has been dispatched
     final_status: str
     token_usage: Annotated[dict, _merge_token_usage]
 
@@ -231,6 +237,116 @@ class ReviewerVerdict(BaseModel):
 
 
 REVIEWER_ROUTES = ("journalist", "orchestrator", "auto")
+
+
+# ── Structured findings (collaboration.structured_findings) ────────────────
+
+class Claim(BaseModel):
+    """One claim in a specialist's report. The id is assigned by the graph, not the model."""
+    id: str = ""
+    text: str
+    epistemic_tag: str = ""
+    sources: list[str] = []
+    confidence: float = 0.5
+    contradicts: list[str] = []        # ids of colleagues' claims this one disputes
+
+
+class SpecialistFindings(BaseModel):
+    narrative: str
+    findings: list[Claim] = []
+
+
+CRITIQUE_INSTRUCTIONS = (
+    "CRITIQUE ROUND: read your colleagues' claims above and report only objections. For each claim "
+    "you dispute, add a finding that explains why and lists that claim's id in `contradicts`. Do not "
+    "repeat your own earlier findings; return no findings if you have no objections."
+)
+MAX_CLAIMS_SHOWN = 20          # per specialist, in the orchestrator's and peers' views
+_CLAIMS_HEADER = "\n\nCLAIMS:\n"
+_EARLIER_MARKER = "\n\n[Earlier findings from "
+MAX_CLAIM_CHARS = 300          # per claim text in those views
+_BRACKETS_RE = re.compile(r"\[([^\[\]]+)\]")
+_CLAIM_ID_SHAPE = re.compile(r"^(\S+)\.\d+\.\d+$")
+
+
+def _normalise_tag(tag: str, vocabulary: list) -> str:
+    """Map a model's tag onto the epistemic_tags vocabulary ("fact" → "[FACT]"); "[UNTAGGED]" if none fits."""
+    if not vocabulary:
+        return tag.strip()
+    wanted = tag.strip().strip("[]").lower()
+    for known in vocabulary:
+        if known.strip("[]").lower() == wanted:
+            return known
+    return "[UNTAGGED]"
+
+
+def _claim_line(claim: dict, max_text: int = None) -> str:
+    text = _truncate(claim["text"], max_text) if max_text else claim["text"]
+    line = f"- [{claim['id']}] {claim['epistemic_tag']} (confidence {claim['confidence']:.2f}) {text}"
+    if claim.get("sources"):
+        line += f" — sources: {'; '.join(claim['sources'])}"
+    if claim.get("contradicts"):
+        line += f" — contradicts: {', '.join(claim['contradicts'])}"
+    return line
+
+
+def _claims_by_agent(claims: dict) -> dict:
+    grouped: dict = {}
+    for claim in claims.values():
+        grouped.setdefault(claim["agent"], []).append(claim)
+    return grouped
+
+
+def _format_claim_views(agent_outputs: dict, claims: dict, exclude: str, max_chars: int) -> str:
+    """The orchestrator's and peers' view with structured findings: claims, not a text slice.
+
+    Claim lines are added newest round first until ``max_chars`` (the same budget
+    as the text view) is used; at least one is always shown. When the agent's
+    latest round produced no claims (a failure note, an unparseable or empty
+    report) that round's text is shown too, so it is not hidden behind older claims.
+    """
+    if not agent_outputs:
+        return "No findings collected yet."
+    grouped = _claims_by_agent(claims)
+    parts = []
+    for agent, output in agent_outputs.items():
+        if agent == exclude:
+            continue
+        own = grouped.get(agent)
+        latest = output.split(_EARLIER_MARKER)[0]
+        if own:
+            # Newest round first (like the text findings); claims keep their order within a round.
+            ordered = sorted(own, key=lambda c: -c["round"])[:MAX_CLAIMS_SHOWN]
+            lines, used = [], 0
+            for claim in ordered:
+                line = _claim_line(claim, MAX_CLAIM_CHARS)
+                if lines and used + len(line) > max_chars:
+                    break
+                lines.append(line)
+                used += len(line) + 1
+            body = "\n".join(lines)
+            if len(lines) < len(own):
+                body += f"\n(… {len(own) - len(lines)} more claims not shown)"
+            if _CLAIMS_HEADER not in latest:
+                body = f"Latest report (no claims):\n{_truncate(latest, max_chars)}\n{body}"
+        else:
+            body = _truncate(output, max_chars)
+        parts.append(f"### [{agent}]\n{body}")
+    return "\n\n".join(parts) if parts else "No findings from colleagues yet."
+
+
+def _disagreements(claims: dict) -> list:
+    """One line per (claim, disputed claim) pair recorded through `contradicts`."""
+    lines = []
+    for claim in claims.values():
+        for other_id in claim.get("contradicts", []):
+            other = claims.get(other_id)
+            if other:
+                lines.append(
+                    f"- [{claim['id']}] {claim['agent']}: {_truncate(claim['text'], MAX_CLAIM_CHARS)}\n"
+                    f"  disputes [{other['id']}] {other['agent']}: {_truncate(other['text'], MAX_CLAIM_CHARS)}"
+                )
+    return lines
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────
@@ -469,7 +585,8 @@ def compute_recursion_limit(config: dict) -> int:
     = 2 steps each), one safety-valve routing step, the Journalist, and a full
     set of reviewer rejections (Journalist + reviewer per loop, plus the final
     force-approval). HITL checkpoint nodes add one step each. A small margin
-    covers resume bookkeeping.
+    covers resume bookkeeping. A collaboration.critique_round pass is a specialist
+    dispatch like any other (it consumes max_agent_calls), so it needs no extra term.
     """
     orch = config.get("orchestrator", {})
     rev = config.get("reviewer", {})
@@ -544,6 +661,10 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
         f"what is still missing. This is honoured once at least {min_rounds} specialist round(s) are done."
         if early_stop else ""
     )
+    collaboration = config.get("collaboration") or {}
+    structured = collaboration.get("structured_findings", False) is True
+    surface = structured and collaboration.get("surface_disagreements", False) is True
+    critique = structured and collaboration.get("critique_round", False) is True
     journalist_name = config["orchestrator"]["journalist"]
     failure_policy = _failure_policy(config)
     # 'END' is deliberately not a target: the orchestrator never runs after the
@@ -554,7 +675,10 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
     def routing_context(state: GraphState) -> tuple:
         agent_outputs = state.get("agent_outputs", {})
         already_consulted = list(agent_outputs.keys())
-        findings = _format_findings(agent_outputs, compress=True, max_chars=max_findings_chars)
+        if structured:
+            findings = _format_claim_views(agent_outputs, state.get("claims") or {}, None, max_findings_chars)
+        else:
+            findings = _format_findings(agent_outputs, compress=True, max_chars=max_findings_chars)
         consulted_note = (
             f"SPECIALISTS ALREADY CONSULTED: {', '.join(already_consulted)}"
             if already_consulted else "No specialists consulted yet."
@@ -592,6 +716,12 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
         requests_block = (
             _reviewer_requests_block(state, specialist_set) if state.get("review_route") == "orchestrator" else ""
         )
+        disagreement_lines = _disagreements(state.get("claims") or {}) if surface else []
+        disagreements_block = (
+            "DISAGREEMENTS BETWEEN SPECIALISTS (resolve them, or make sure the Journalist reports them):\n"
+            + "\n".join(disagreement_lines) + "\n\n"
+            if disagreement_lines else ""
+        )
         # Empty unless orchestrator.allow_tools is on, so the default prompt is unchanged.
         checks_block = (
             f"YOUR QUICK CHECKS (your own tool results, gathered before this decision):\n{quick_checks}\n\n"
@@ -602,6 +732,7 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             f"RESEARCH TASK:\n{state['task']}\n\n"
             f"{consulted_note}\n\n"
             f"FINDINGS COLLECTED SO FAR:\n{findings}\n\n"
+            f"{disagreements_block}"
             f"{checks_block}"
             f"{requests_block}"
             f"ALL AVAILABLE SPECIALISTS: {', '.join(specialist_names)}\n\n"
@@ -685,6 +816,22 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
                     f"early_stop.min_rounds is {min_rounds}, so continuing"
                 )
 
+        critique_targets, critique_considered = [], False
+        if critique and not specialist_dispatches and not state.get("critique_done"):
+            # collaboration.critique_round: at the first hand-over to the Journalist, every
+            # specialist with claims gets one objections-only pass. One call is kept back so
+            # the orchestrator can read the objections afterwards instead of hitting the
+            # safety valve; the round is considered once, whether or not it runs.
+            critique_considered = True
+            grouped = _claims_by_agent(state.get("claims") or {})
+            with_claims = [name for name in specialist_names if name in grouped]
+            if len(with_claims) >= 2:
+                critique_targets = with_claims[:max(0, max_calls - call_count - 1)]
+            if critique_targets:
+                valid_next = specialist_dispatches = critique_targets
+                assignments_dict = {name: CRITIQUE_INSTRUCTIONS for name in critique_targets}
+                routing_notes.append(f"critique round: {critique_targets} review each other's claims")
+
         if ignored_targets:
             routing_notes.append(f"ignored unknown targets {ignored_targets}")
         if specialist_dispatches and "Journalist" in valid_next:
@@ -702,6 +849,10 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             ))],
             "token_usage": _merge_token_usage(round_usage, check_usage) if check_usage else round_usage,
         }
+        if critique_considered:
+            update["critique_done"] = True
+        if critique_targets:
+            update["next_instructions"] = CRITIQUE_INSTRUCTIONS
         if specialist_dispatches:
             update["specialist_rounds"] = rounds_done + 1
         else:
@@ -906,7 +1057,7 @@ def make_on_rejection_node():
 # ── Specialist node factory ────────────────────────────────────────────────
 
 def make_specialist_node(persona_name: str, config: dict, model, tools: list, summary_model=None,
-                         limiter=None):
+                         limiter=None, findings_model=None):
     """Return an async LangGraph node function for a specialist persona.
 
     The node uses _run_tool_loop_async so that multiple tool calls issued in a
@@ -917,6 +1068,11 @@ def make_specialist_node(persona_name: str, config: dict, model, tools: list, su
     ``summary_model`` is the same model without tools; it writes the final answer
     if the tool-round budget runs out (defaults to ``model``). ``limiter`` (a
     _LoopLocalSemaphore) bounds how many specialists run at once.
+
+    ``findings_model`` (collaboration.structured_findings) is the persona's model
+    with structured output for SpecialistFindings: after the tool loop, one more
+    call restates the report as claims, which get ids, are written to the
+    traceability matrix, and are what colleagues and the orchestrator see.
     """
     persona_cfg = get_persona_config(config, persona_name)
     system_prompt = build_agent_system_prompt(
@@ -928,6 +1084,62 @@ def make_specialist_node(persona_name: str, config: dict, model, tools: list, su
     max_peer_chars = config["orchestrator"].get("max_peer_chars", MAX_PEER_CHARS)
     failure_policy = _failure_policy(config)
     summary_model = summary_model or model
+    tag_vocabulary = list(config.get("epistemic_tags") or [])
+    matrix_path = resolve_swarm_path(config, "traceability_matrix")
+    slug = findings_slug(persona_name)
+
+    async def structure_findings(state: GraphState, report: str, run_config) -> tuple:
+        """Restate ``report`` as claims: (text for agent_outputs, {id: claim}, token usage, note)."""
+        known_ids = sorted(state.get("claims") or {})
+        prompt = (
+            f"RESEARCH TASK:\n{state['task']}\n\n"
+            f"YOUR REPORT:\n{report}\n\n"
+            "Restate your report as structured findings: a short `narrative`, and one entry in `findings` "
+            "per distinct claim, with `text`, `epistemic_tag`"
+            + (f" (one of: {', '.join(tag_vocabulary)})" if tag_vocabulary else "")
+            + ", `sources` (PMID, DOI or URL exactly as found), `confidence` between 0 and 1, and "
+            "`contradicts`: the ids of colleagues' claims your claim disputes"
+            + (f" (known ids: {', '.join(known_ids)})." if known_ids else " (none are known yet).")
+        )
+        result = await findings_model.ainvoke(
+            [SystemMessage(content=system_prompt), HumanMessage(content=prompt)], config=run_config,
+        )
+        parsed, usage = result, {}
+        if isinstance(result, dict) and "parsed" in result:
+            usage = _extract_token_usage(result.get("raw"))
+            parsed = result["parsed"] if result.get("parsing_error") is None else None
+        if not isinstance(parsed, SpecialistFindings):
+            return report, {}, usage, "structured findings unavailable (unparseable reply); kept the text report"
+        round_no = max(1, state.get("specialist_rounds", 0))
+        claims = {}
+        for i, item in enumerate(parsed.findings, 1):
+            claim_id = f"{slug}.{round_no}.{i}"
+            claims[claim_id] = {
+                "id": claim_id, "agent": persona_name, "round": round_no, "text": item.text.strip(),
+                "epistemic_tag": _normalise_tag(item.epistemic_tag, tag_vocabulary),
+                "sources": [s.strip() for s in item.sources if s and s.strip()],
+                "confidence": min(1.0, max(0.0, float(item.confidence))),
+                "contradicts": [c for c in item.contradicts if c in known_ids],
+            }
+        # The full report stays the agent's output (the Journalist and later rounds read it);
+        # the claims are appended so their ids are visible next to the evidence.
+        text = report
+        if claims:
+            text += _CLAIMS_HEADER + "\n".join(_claim_line(c) for c in claims.values())
+            rows = [
+                matrix_row(
+                    "; ".join(c["sources"]) or "(no source given)", persona_name, f"[{c['id']}] {c['text']}",
+                    f"Structured finding (confidence {c['confidence']:.2f})"
+                    + (f"; contradicts {', '.join(c['contradicts'])}" if c["contradicts"] else ""),
+                    c["epistemic_tag"],
+                )
+                for c in claims.values()
+            ]
+            logged = write_matrix_rows(str(matrix_path), rows)
+            note = "" if logged.startswith("SUCCESS") else f"claims not logged to the matrix: {logged}"
+        else:
+            note = ""
+        return text, claims, usage, note
 
     async def specialist_node(state: GraphState, config: RunnableConfig = None):
         agent_instructions = (
@@ -935,19 +1147,26 @@ def make_specialist_node(persona_name: str, config: dict, model, tools: list, su
             or state.get("next_instructions")
             or "Provide your expert analysis."
         )
-        peer_findings = _format_findings(
-            state.get("agent_outputs", {}),
-            compress=True,
-            exclude=persona_name,
-            max_chars=max_peer_chars,
-        )
+        if findings_model is not None:
+            peer_findings = _format_claim_views(
+                state.get("agent_outputs", {}), state.get("claims") or {}, persona_name, max_peer_chars,
+            )
+        else:
+            peer_findings = _format_findings(
+                state.get("agent_outputs", {}),
+                compress=True,
+                exclude=persona_name,
+                max_chars=max_peer_chars,
+            )
         context = HumanMessage(content=(
             f"RESEARCH TASK:\n{state['task']}\n\n"
             f"YOUR SPECIFIC INSTRUCTIONS:\n{agent_instructions}\n\n"
             f"RELEVANT FINDINGS FROM COLLEAGUES:\n{peer_findings}"
         ))
-        try:
-            async with limiter.get() if limiter else contextlib.nullcontext():
+        new_claims = {}
+        # The structured call runs inside the limiter too, so max_parallel_agents caps it.
+        async with limiter.get() if limiter else contextlib.nullcontext():
+            try:
                 response, usage = await _run_tool_loop_async(
                     model, tools,
                     [SystemMessage(content=system_prompt), context],
@@ -956,24 +1175,42 @@ def make_specialist_node(persona_name: str, config: dict, model, tools: list, su
                     agent_name=persona_name,
                     config=config,
                 )
-            final_text = _message_text(response)
-            brief = final_text[:150] + "…" if len(final_text) > 150 else final_text
-            status = f"[{persona_name}]: {brief}"
-        except GraphBubbleUp:
-            raise
-        except Exception as e:
-            if failure_policy == "abort":
+                final_text = _message_text(response)
+                brief = final_text[:150] + "…" if len(final_text) > 150 else final_text
+                status = f"[{persona_name}]: {brief}"
+            except GraphBubbleUp:
                 raise
-            final_text = _failure_note(persona_name, e)
-            status = final_text
-            usage = {}
+            except Exception as e:
+                if failure_policy == "abort":
+                    raise
+                final_text = _failure_note(persona_name, e)
+                status = final_text
+                usage = {}
+
+            if findings_model is not None and final_text.strip() and not final_text.startswith(FAILED_PREFIX):
+                try:
+                    final_text, new_claims, claim_usage, note = await structure_findings(state, final_text, config)
+                    usage = _merge_token_usage(usage, claim_usage)
+                except GraphBubbleUp:
+                    raise
+                except Exception as e:
+                    if failure_policy == "abort":
+                        raise
+                    note = f"structured findings failed ({type(e).__name__}: {e}); kept the text report"
+                if new_claims:
+                    status += f" [{len(new_claims)} claim(s)]"
+                if note:
+                    status += f" [{note}]"
 
         previous = state.get("agent_outputs", {}).get(persona_name, "")
-        return {
+        update = {
             "messages": [AIMessage(content=status)],
             "agent_outputs": {persona_name: _combine_findings(persona_name, previous, final_text)},
             "token_usage": usage,
         }
+        if new_claims:
+            update["claims"] = new_claims
+        return update
 
     return specialist_node
 
@@ -993,6 +1230,9 @@ def make_journalist_node(config: dict, model, tools: list, summary_model=None):
     failure_policy = _failure_policy(config)
     reviewer_enabled = config["reviewer"].get("enabled", True)
     summary_model = summary_model or model
+    collaboration = config.get("collaboration") or {}
+    structured = collaboration.get("structured_findings", False) is True
+    surface = structured and collaboration.get("surface_disagreements", False) is True
     # Rendered once at build time: a broken template fails before any API spend.
     brief = build_journalist_brief(config, [getattr(t, "name", "") for t in tools])
 
@@ -1006,6 +1246,18 @@ def make_journalist_node(config: dict, model, tools: list, summary_model=None):
             sections.append(f"INSTRUCTIONS FROM THE ORCHESTRATOR:\n{state['journalist_instructions']}")
         if state.get("user_framing"):
             sections.append(f"FRAMING FROM THE USER (apply to every draft):\n{state['user_framing']}")
+        if structured and state.get("claims"):
+            sections.append(
+                "CLAIM IDS: each claim above has an id such as "
+                f"[{next(iter(state['claims']))}]. Cite the ids of the claims you rely on, in square "
+                "brackets next to the reference, so they can be checked against the traceability matrix."
+            )
+        disagreement_lines = _disagreements(state.get("claims") or {}) if surface else []
+        if disagreement_lines:
+            sections.append(
+                "POINTS OF DISAGREEMENT between specialists. Include a 'Points of disagreement' section "
+                "that presents each side and its evidence:\n" + "\n".join(disagreement_lines)
+            )
         if state.get("revision_count", 0) > 0:
             sections.append(f"PREVIOUS DRAFT (rejected):\n{agent_outputs.get(journalist_name, '')}")
             sections.append(
@@ -1075,6 +1327,8 @@ def make_reviewer_node(config: dict, reviewer_model, hitl_cfg: dict = None, spec
     excerpt_rows = reviewer_cfg.get("matrix_excerpt_rows", 50)
     max_agent_calls = config["orchestrator"].get("max_agent_calls", 8)
     specialists = list(specialist_names or [])
+    check_claim_ids = "matrix" in context and (config.get("collaboration") or {}).get("structured_findings") is True
+    specialist_slugs = {findings_slug(name) for name in specialists}
     structured_model = None
     if on_rejection != "journalist":
         structured_model = reviewer_model.with_structured_output(ReviewerVerdict, include_raw=True)
@@ -1098,6 +1352,8 @@ def make_reviewer_node(config: dict, reviewer_model, hitl_cfg: dict = None, spec
                 f"TRACEABILITY MATRIX (up to {excerpt_rows} rows logged in this run). Check that the "
                 f"draft's cited claims are recorded here:\n{_matrix_excerpt(config, excerpt_rows)}"
             )
+        if check_claim_ids:
+            sections.append(_claim_id_check(draft, state.get("claims") or {}, specialist_slugs))
         return "\n\n".join(sections)
 
     def judge(state: GraphState, draft: str) -> tuple:
@@ -1249,6 +1505,29 @@ def _reviewer_requests_block(state: GraphState, specialist_set: set) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+def _claim_id_check(draft: str, claims: dict, slugs: set) -> str:
+    """Compare the claim ids cited in the draft with the claims logged in this run.
+
+    Brackets may group ids ("[a.1.1, b.2.3]"). A token only counts as a claim id
+    if it has the id shape and starts with one of the specialists' slugs, so
+    section numbers ("[1.2.3]") and author-year citations are not mistaken for ids.
+    """
+    cited = []
+    for group in _BRACKETS_RE.findall(draft):
+        for token in re.split(r"[,;]", group):
+            match = _CLAIM_ID_SHAPE.match(token.strip())
+            if match and match.group(1) in slugs and token.strip() not in cited:
+                cited.append(token.strip())
+    if not cited:
+        return "CLAIM-ID CHECK: the draft cites no claim ids."
+    unknown = [c for c in cited if c not in claims]
+    return (
+        f"CLAIM-ID CHECK: the draft cites {len(cited)} claim id(s); "
+        + (f"not found among this run's claims: {', '.join(unknown)}." if unknown
+           else "all of them are among this run's claims.")
+    )
+
+
 # Only "### Run" starts a run; "### Resumed run" continues one, so its earlier rows still count.
 _MATRIX_SECTION_RE = re.compile(r"^### Run\b")
 
@@ -1348,13 +1627,18 @@ def build_graph(config: dict = None, checkpointer=_NO_CHECKPOINTER):
     # loop at once when the orchestrator fans out; the others wait their turn.
     max_parallel = config["orchestrator"].get("max_parallel_agents")
     limiter = _LoopLocalSemaphore(max_parallel) if max_parallel else None
+    structured_findings = (config.get("collaboration") or {}).get("structured_findings", False) is True
     for name in specialist_names:
         persona_cfg = get_persona_config(config, name)
         tools = load_tools_for_persona(config, persona_cfg)
         own_model = model_for(name)
         specialist_model = own_model.bind_tools(tools) if tools else own_model
+        findings_model = (
+            own_model.with_structured_output(SpecialistFindings, include_raw=True) if structured_findings else None
+        )
         workflow.add_node(
-            name, make_specialist_node(name, config, specialist_model, tools, own_model, limiter=limiter),
+            name, make_specialist_node(name, config, specialist_model, tools, own_model, limiter=limiter,
+                                       findings_model=findings_model),
         )
 
     # ── Register journalist ──────────────────────────────────────────────

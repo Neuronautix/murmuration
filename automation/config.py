@@ -78,11 +78,46 @@ def _validate_options(config: dict) -> None:
 
     _validate_checkpointer(config)
     _validate_reviewer_options(config.get("reviewer") or {})
+    _validate_collaboration(config.get("collaboration"), config.get("personas") or [])
 
     for persona in config.get("personas") or []:
         if not isinstance(persona, dict):
             continue  # malformed entries are reported by doctor / fail in get_persona_config
         _validate_model_override(persona.get("model"), f"personas[{persona.get('name', '?')}].model")
+
+
+COLLABORATION_KEYS = ("structured_findings", "surface_disagreements", "critique_round")
+
+
+def _validate_collaboration(block, personas: list) -> None:
+    if block is None:
+        return
+    if not isinstance(block, dict):
+        raise ValueError("swarm_config.yml: collaboration must be a mapping of "
+                         f"{', '.join(COLLABORATION_KEYS)} to true/false.")
+    for key, value in block.items():
+        if key not in COLLABORATION_KEYS:
+            raise ValueError(f"swarm_config.yml: collaboration.{key} is not supported; "
+                             f"use {', '.join(COLLABORATION_KEYS)}.")
+        if not isinstance(value, bool):
+            raise ValueError(f"swarm_config.yml: collaboration.{key} must be true or false, not {value!r}.")
+    for key in ("surface_disagreements", "critique_round"):
+        if block.get(key) and not block.get("structured_findings"):
+            raise ValueError(
+                f"swarm_config.yml: collaboration.{key} needs collaboration.structured_findings: true "
+                "(it works on claim objects)."
+            )
+    if block.get("structured_findings"):
+        by_slug: dict = {}
+        for persona in personas:
+            if isinstance(persona, dict):
+                by_slug.setdefault(findings_slug(persona.get("name", "")), []).append(persona.get("name", ""))
+        for slug, names in by_slug.items():
+            if len(names) > 1:
+                raise ValueError(
+                    f"swarm_config.yml: collaboration.structured_findings: personas {', '.join(names)} would "
+                    f"share the claim-id prefix '{slug}'; rename one of them."
+                )
 
 
 REVIEWER_CONTEXT_ITEMS = ("draft", "task", "matrix")

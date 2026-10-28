@@ -576,6 +576,32 @@ def _calling_agent(config: RunnableConfig | None) -> str:
     return str(name) if name else "Auto-Agent"
 
 
+def matrix_row(source: str, agent: str, claim: str, method: str, epistemic_tag: str) -> str:
+    """One Markdown row of the traceability matrix, with every cell made table-safe."""
+    return (
+        f"| *Live Search:* {_md_cell(source)} | **{_md_cell(agent)}** | "
+        f"{_md_cell(claim)} | {_md_cell(method)} | **{_md_cell(epistemic_tag)}** |\n"
+    )
+
+
+def write_matrix_rows(filepath, rows: list) -> str:
+    """Append pre-formatted rows to an existing matrix; 'SUCCESS…' or a 'FAILED…' reason.
+
+    Used by the graph to log structured findings (collaboration.structured_findings)
+    with the same format, header guard and lock as the agents' tool.
+    """
+    if not os.path.exists(filepath):
+        return f"FAILED: '{filepath}' does not exist."
+    try:
+        if _MATRIX_HEADER_SENTINEL not in Path(filepath).read_text(encoding="utf-8"):
+            return "FAILED: expected table header not found in the traceability matrix."
+        with _MATRIX_LOCK, open(filepath, "a", encoding="utf-8") as f:
+            f.write("".join(rows))
+        return f"SUCCESS: logged {len(rows)} row(s)."
+    except Exception as e:
+        return f"FAILED: {e}"
+
+
 # `config` is injected by LangChain (it is annotated RunnableConfig) and is not part of the
 # schema the model sees; the graph puts the calling persona's name in its metadata.
 @tool
@@ -615,11 +641,8 @@ def append_traceability_matrix(fact: str, source: str, epistemic_tag: str, confi
         )
 
     try:
-        new_row = (
-            f"| *Live Search:* {_md_cell(source)} | **{_md_cell(_calling_agent(config))}** | "
-            f"{_md_cell(fact)} | Automatically sourced and summarized via Tool API. | "
-            f"**{_md_cell(epistemic_tag)}** |\n"
-        )
+        new_row = matrix_row(source, _calling_agent(config), fact,
+                             "Automatically sourced and summarized via Tool API.", epistemic_tag)
         # Parallel specialists call this from a shared thread pool; on Windows an
         # append is seek-then-write, so unserialised appends can overwrite each other.
         with _MATRIX_LOCK, open(filepath, "a", encoding="utf-8") as f:

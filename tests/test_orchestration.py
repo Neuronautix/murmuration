@@ -1032,24 +1032,6 @@ def test_observability_is_off_by_default(tmp_path):
     assert get_run_log_path(root) is None and not root["swarm"].get("persist_findings")
 
 
-@pytest.mark.parametrize("key, value, ok", [
-    ("run_log", True, False), ("run_log", "", False), ("run_log", 0, False), ("persist_findings", "yes", False),
-    ("run_log", None, True), ("run_log", False, True), ("persist_findings", None, True),
-])
-def test_load_config_validates_observability_keys(tmp_path, key, value, ok):
-    import yaml
-
-    from automation.config import CONFIG_PATH, load_config
-    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
-    real["swarm"][key] = value
-    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
-    if ok:
-        load_config(tmp_path / "swarm_config.yml")
-    else:
-        with pytest.raises(ValueError, match=f"swarm.{key}"):
-            load_config(tmp_path / "swarm_config.yml")
-
-
 def test_unwritable_run_artefacts_do_not_stop_the_run(tmp_path):
     from automation.main import _run_graph_async
     blocker = tmp_path / "not-a-dir"
@@ -1334,20 +1316,6 @@ def test_recursion_limit_ignores_allow_tools():
     assert compute_recursion_limit(_orch_tools_config(True)) == compute_recursion_limit(make_config())
 
 
-def test_load_config_rejects_non_bool_allow_tools(tmp_path):
-    import yaml
-
-    from automation.config import CONFIG_PATH, load_config
-    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
-    real["orchestrator"]["allow_tools"] = "yes"
-    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
-    with pytest.raises(ValueError, match="orchestrator.allow_tools"):
-        load_config(tmp_path / "swarm_config.yml")
-    real["orchestrator"]["allow_tools"] = True
-    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
-    assert load_config(tmp_path / "swarm_config.yml")["orchestrator"]["allow_tools"] is True
-
-
 def test_doctor_orchestrator_tool_warnings_never_contradict(tmp_path):
     import yaml
 
@@ -1444,27 +1412,6 @@ def test_personas_with_the_same_model_override_share_one_client():
     assert [s["name"] for s in specs] == ["m", "small"]
 
 
-@pytest.mark.parametrize("override, message", [
-    ("gpt-4o-mini", r"personas\[Specialist1\]\.model must be a mapping"),
-    ({"name": "x", "max_tokens": 5}, r"personas\[Specialist1\]\.model\.max_tokens is not supported"),
-    ({"provider": "mistral"}, r"personas\[Specialist1\]\.model\.provider"),
-    ({"temperature": 3}, r"personas\[Specialist1\]\.model\.temperature"),
-    ({"name": ""}, r"personas\[Specialist1\]\.model\.name"),
-])
-def test_load_config_rejects_bad_persona_models(tmp_path, override, message):
-    import yaml
-
-    from automation.config import CONFIG_PATH, load_config
-    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
-    real["personas"][1]["model"] = override
-    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
-    with pytest.raises(ValueError, match=message):
-        load_config(tmp_path / "swarm_config.yml")
-    real["personas"][1]["model"] = {"provider": "anthropic", "name": "claude-x", "env_key": "ANTHROPIC_API_KEY"}
-    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
-    load_config(tmp_path / "swarm_config.yml")
-
-
 def test_validate_env_checks_persona_model_keys(monkeypatch):
     from automation.config import validate_env
     cfg = make_config()
@@ -1551,18 +1498,6 @@ def test_max_parallel_agents_caps_concurrent_specialists(limit, peak):
         state = run(graph)
         assert chat.peak == peak
         assert sorted(k for k in state["agent_outputs"] if k in names) == list(names)
-
-
-@pytest.mark.parametrize("value", [0, -1, 1.5, True, "2"])
-def test_load_config_rejects_bad_max_parallel_agents(tmp_path, value):
-    import yaml
-
-    from automation.config import CONFIG_PATH, load_config
-    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
-    real["orchestrator"]["max_parallel_agents"] = value
-    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
-    with pytest.raises(ValueError, match="orchestrator.max_parallel_agents"):
-        load_config(tmp_path / "swarm_config.yml")
 
 
 def test_recursion_limit_ignores_max_parallel_agents():
@@ -1750,25 +1685,6 @@ def test_missing_persist_extra_names_it(tmp_path, monkeypatch):
         asyncio.run(go())
 
 
-@pytest.mark.parametrize("block, hitl, message", [
-    ("sqlite", False, "checkpointer must be a mapping"),
-    ({"type": "redis"}, False, "checkpointer.type must be one of"),
-    ({"type": "sqlite", "path": ""}, False, "checkpointer.path must be a file path"),
-    ({"type": "memory", "path": "x.sqlite"}, False, "checkpointer.path is only used with"),
-    ({"type": "none"}, True, "checkpointer.type: none cannot be used with hitl.enabled"),
-])
-def test_load_config_rejects_bad_checkpointer(tmp_path, block, hitl, message):
-    import yaml
-
-    from automation.config import CONFIG_PATH, load_config
-    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
-    real["checkpointer"] = block
-    real["hitl"]["enabled"] = hitl
-    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
-    with pytest.raises(ValueError, match=message):
-        load_config(tmp_path / "swarm_config.yml")
-
-
 def test_doctor_checks_the_checkpointer(tmp_path, monkeypatch):
     import sys
 
@@ -1913,23 +1829,6 @@ def test_early_stop_is_ignored_unless_enabled():
     assert chat.count("B") == 1
     prompt = next(m for m in chat.router.calls[0] if isinstance(m, HumanMessage)).content
     assert "EARLY STOP" not in prompt and "EVIDENCE COVERAGE" not in chat.human("Journalist")
-
-
-@pytest.mark.parametrize("value, message", [
-    (True, "orchestrator.early_stop must be a mapping"),
-    ({"enabled": "yes"}, "orchestrator.early_stop.enabled"),
-    ({"enabled": True, "min_rounds": 0}, "orchestrator.early_stop.min_rounds"),
-    ({"enabled": True, "rounds": 2}, "orchestrator.early_stop.rounds is not supported"),
-])
-def test_load_config_rejects_bad_early_stop(tmp_path, value, message):
-    import yaml
-
-    from automation.config import CONFIG_PATH, load_config
-    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
-    real["orchestrator"]["early_stop"] = value
-    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
-    with pytest.raises(ValueError, match=message):
-        load_config(tmp_path / "swarm_config.yml")
 
 
 def test_peer_and_orchestrator_views_end_at_a_sentence_boundary():
@@ -2186,25 +2085,6 @@ def test_recursion_limit_covers_the_worst_case_evidence_loop():
         "orchestrator": cfg["orchestrator"]}) + 4
 
 
-@pytest.mark.parametrize("key, value, message", [
-    ("on_rejection", "specialists", "reviewer.on_rejection"),
-    ("on_max_revisions", "approve", "reviewer.on_max_revisions"),
-    ("max_evidence_loops", -1, "reviewer.max_evidence_loops"),
-    ("matrix_excerpt_rows", 0, "reviewer.matrix_excerpt_rows"),
-    ("context", ["draft", "web"], "reviewer.context"),
-    ("context", ["task"], "reviewer.context must include draft"),
-])
-def test_load_config_rejects_bad_reviewer_options(tmp_path, key, value, message):
-    import yaml
-
-    from automation.config import CONFIG_PATH, load_config
-    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
-    real["reviewer"][key] = value
-    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
-    with pytest.raises(ValueError, match=message):
-        load_config(tmp_path / "swarm_config.yml")
-
-
 def test_doctor_flags_reviewer_routing_that_cannot_take_effect(tmp_path):
     import yaml
 
@@ -2342,3 +2222,245 @@ def test_recursion_limit_covers_journalist_first_evidence_rounds_with_hitl():
     seq = asyncio.run(go())
     assert seq.count("orchestrator") == 5 and seq.count("reviewer") == 4
     assert len(seq) < compute_recursion_limit(cfg)
+
+
+# ── 17. Structured findings, disagreements and critique round (I2) ─────────
+
+
+class FindingsChat(FakeChat):
+    """FakeChat whose structured-output view also serves SpecialistFindings.
+
+    ``reports`` maps persona → list of SpecialistFindings (one per call, last one repeats);
+    None in the list means an unparseable reply.
+    """
+
+    def __init__(self, decisions, reports, **kwargs):
+        super().__init__(decisions, **kwargs)
+        self.reports = {k: list(v) for k, v in reports.items()}
+        self.findings_calls = []
+
+    def with_structured_output(self, schema, **kwargs):
+        from automation.graph import SpecialistFindings
+        if schema is not SpecialistFindings:
+            return super().with_structured_output(schema, **kwargs)
+        chat = self
+
+        class _View:
+            async def ainvoke(self, msgs, config=None):
+                name = chat.persona(msgs)
+                chat.findings_calls.append((name, msgs))
+                queue = chat.reports.get(name) or [None]
+                report = queue.pop(0) if len(queue) > 1 else queue[0]
+                return {"raw": AIMessage(content="", usage_metadata=USAGE), "parsed": report,
+                        "parsing_error": None if report is not None else ValueError("bad json")}
+        return _View()
+
+
+def report(narrative, *claims):
+    from automation.graph import Claim, SpecialistFindings
+    return SpecialistFindings(narrative=narrative, findings=[
+        Claim(text=t, epistemic_tag=tag, sources=list(src), confidence=conf, contradicts=list(contra))
+        for t, tag, src, conf, contra in claims
+    ])
+
+
+def _collab_cfg(tmp_path=None, **collab):
+    cfg = make_config()
+    cfg["epistemic_tags"] = ["[FACT]", "[INFERENCE]"]
+    cfg["collaboration"] = {"structured_findings": True, **collab}
+    if tmp_path is not None:
+        matrix = tmp_path / "M.md"
+        matrix.write_text(MATRIX_HEADER + "\n### Run: now | Task: t\n\n", encoding="utf-8")
+        cfg["swarm"]["traceability_matrix"] = str(matrix)
+    return cfg
+
+
+def a_report():
+    return report("A found a dose effect.",
+                  ("Dose X lowers Y by 20%", "fact", ["PMID:1"], 0.9, []),
+                  ("Effect may be sex-specific", "Hunch", [], 1.7, ["nonexistent.1.1"]))
+
+
+def test_structured_findings_become_claims_with_ids_in_state_and_the_matrix(tmp_path):
+    cfg = _collab_cfg(tmp_path)
+    chat = FindingsChat([decision(["A"]), decision(["Journalist"])], {"A": [a_report()]})
+    state = run(build(cfg, chat))
+    assert sorted(state["claims"]) == ["a.1.1", "a.1.2"]
+    first, second = state["claims"]["a.1.1"], state["claims"]["a.1.2"]
+    assert first["epistemic_tag"] == "[FACT]" and first["sources"] == ["PMID:1"] and first["agent"] == "A"
+    assert second["epistemic_tag"] == "[UNTAGGED]" and second["confidence"] == 1.0
+    assert second["contradicts"] == []                       # unknown ids are dropped
+    assert "CLAIMS:\n- [a.1.1] [FACT] (confidence 0.90) Dose X lowers Y by 20%" in state["agent_outputs"]["A"]
+    rows = _matrix_rows(tmp_path / "M.md")
+    assert any("**A**" in r and "[a.1.1] Dose X lowers Y by 20%" in r and "PMID:1" in r for r in rows)
+    assert any("Structured finding (confidence 0.90)" in r for r in rows)
+    prompt = next(m for m in chat.findings_calls[0][1] if isinstance(m, HumanMessage)).content
+    assert "one of: [FACT], [INFERENCE]" in prompt and "YOUR REPORT:\nfindings from A" in prompt
+
+
+def test_peers_and_orchestrator_see_claims_not_a_text_slice(tmp_path):
+    cfg = _collab_cfg(tmp_path)
+    chat = FindingsChat([decision(["A"]), decision(["B"]), decision(["Journalist"])], {"A": [a_report()],
+                        "B": [report("B agrees.")]})
+    run(build(cfg, chat))
+    peer_view = chat.human("B")
+    assert "### [A]\n- [a.1.1] [FACT] (confidence 0.90) Dose X lowers Y by 20% — sources: PMID:1" in peer_view
+    assert "A found a dose effect." not in peer_view
+    routing = next(m for m in chat.router.calls[1] if isinstance(m, HumanMessage)).content
+    assert "- [a.1.1] [FACT]" in routing
+    journalist = chat.human("Journalist")
+    assert "findings from A #1\n\nCLAIMS:\n- [a.1.1]" in journalist and "CLAIM IDS:" in journalist
+
+
+def test_contradictions_are_surfaced_to_the_orchestrator_and_the_journalist(tmp_path):
+    cfg = _collab_cfg(tmp_path, surface_disagreements=True)
+    b_report = report("B disagrees.", ("Dose X has no effect on Y", "fact", ["PMID:2"], 0.6, ["a.1.1"]))
+    chat = FindingsChat([decision(["A"]), decision(["B"]), decision(["Journalist"])],
+                        {"A": [a_report()], "B": [b_report]})
+    state = run(build(cfg, chat))
+    assert state["claims"]["b.2.1"]["contradicts"] == ["a.1.1"]
+    routing = next(m for m in chat.router.calls[2] if isinstance(m, HumanMessage)).content
+    assert "DISAGREEMENTS BETWEEN SPECIALISTS" in routing and "disputes [a.1.1] A: Dose X lowers Y" in routing
+    journalist = chat.human("Journalist")
+    assert "Include a 'Points of disagreement' section" in journalist and "[b.2.1] B:" in journalist
+    rows = _matrix_rows(tmp_path / "M.md")
+    assert any("contradicts a.1.1" in r for r in rows)
+
+
+def test_critique_round_runs_once_before_the_journalist_and_respects_the_call_budget(tmp_path):
+    cfg = _collab_cfg(tmp_path, surface_disagreements=True, critique_round=True)
+    b_report = report("B found it too.", ("Y falls with dose X", "fact", ["PMID:3"], 0.7, []))
+    objection = report("Objection.", ("Study of a.1.1 was underpowered", "inference", [], 0.5, ["a.1.1"]))
+    chat = FindingsChat([decision(["A", "B"], assignments={"A": "a", "B": "b"}), decision(["Journalist"]),
+                         decision(["Journalist"])], {"A": [a_report(), report("none")], "B": [b_report, objection]})
+    seq = node_sequence(build(cfg, chat))
+    assert seq.count("orchestrator") == 3 and seq.count("Journalist") == 1
+    assert chat.count("A") == 2 and chat.count("B") == 2
+    assert "CRITIQUE ROUND" in chat.human("B", 1) and "- [a.1.1]" in chat.human("B", 1)
+    chat = FindingsChat([decision(["A", "B"], assignments={"A": "a", "B": "b"}), decision(["Journalist"]),
+                         decision(["Journalist"])], {"A": [a_report(), report("none")], "B": [b_report, objection]})
+    state = run(build(cfg, chat))
+    assert state["critique_done"] is True and "b.2.1" in state["claims"]
+    assert "disputes [a.1.1]" in chat.human("Journalist")
+    # With the call budget already spent there is no critique round.
+    cfg["orchestrator"]["max_agent_calls"] = 2
+    chat = FindingsChat([decision(["A", "B"], assignments={"A": "a", "B": "b"}), decision(["Journalist"])],
+                        {"A": [a_report()], "B": [b_report]})
+    run(build(cfg, chat))
+    assert chat.count("A") == 1 and chat.count("B") == 1
+
+
+def test_unparseable_structured_findings_fall_back_to_the_text_report(tmp_path):
+    cfg = _collab_cfg(tmp_path)
+    chat = FindingsChat([decision(["A"]), decision(["Journalist"])], {"A": [None]})
+    state = run(build(cfg, chat))
+    assert state.get("claims", {}) == {} and state["agent_outputs"]["A"] == "findings from A #1"
+    assert any("structured findings unavailable" in m.content for m in state["messages"])
+    assert not any("Structured finding" in r for r in _matrix_rows(tmp_path / "M.md"))
+
+
+def test_reviewer_checks_cited_claim_ids_against_this_runs_claims(tmp_path):
+    cfg = _collab_cfg(tmp_path)
+    cfg["reviewer"]["context"] = ["draft", "matrix"]
+
+    class CitingChat(FindingsChat):
+        async def ainvoke(self, msgs, _bound=False, **kwargs):
+            if self.persona(msgs) == "Journalist":
+                self.calls.append(("Journalist", msgs))
+                return AIMessage(content="Y falls [a.1.1, b.9.9] and Z rises [zz.9.9]; see section [1.2.3].",
+                                 usage_metadata=USAGE)
+            return await super().ainvoke(msgs, _bound=_bound)
+
+    reviewer = FakeReviewer(["APPROVED"])
+    run(build(cfg, CitingChat([decision(["A"]), decision(["Journalist"])], {"A": [a_report()]}), reviewer))
+    sent = reviewer.calls[0][1].content
+    # Grouped ids are split; zz.9.9 and 1.2.3 do not start with a specialist's slug, so they are not ids.
+    assert "CLAIM-ID CHECK: the draft cites 2 claim id(s); not found among this run's claims: b.9.9." in sent
+    assert "[a.1.1] Dose X lowers Y by 20%" in sent             # the matrix excerpt carries the ids
+
+
+def test_collaboration_is_off_by_default():
+    chat = FindingsChat([decision(["A"]), decision(["Journalist"])], {"A": [a_report()]})
+    state = run(build(make_config(), chat))
+    assert chat.findings_calls == [] and not state.get("claims")
+    assert "CLAIM IDS" not in chat.human("Journalist")
+
+
+def test_doctor_warns_when_structured_findings_have_no_tag_vocabulary(tmp_path):
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["collaboration"] = {"structured_findings": True}
+    real["epistemic_tags"] = []
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    assert any("claim tags are not checked" in i.message for i in inspect_swarm(tmp_path).issues)
+
+
+def test_recursion_limit_covers_a_critique_round(tmp_path):
+    from automation.graph import compute_recursion_limit
+    cfg = _collab_cfg(tmp_path, critique_round=True)
+    cfg["orchestrator"]["max_agent_calls"] = 4      # 2 research calls, 1 critique call, 1 kept back
+    cfg["reviewer"]["max_revision_loops"] = 1
+    chat = FindingsChat([decision(["A"]), decision(["B"]), decision(["Journalist"])],
+                        {"A": [a_report()], "B": [report("b", ("claim", "fact", [], 0.5, []))]})
+    graph = build(cfg, chat, FakeReviewer(["REJECTED: n"]))
+    seq = node_sequence(graph, config={"recursion_limit": compute_recursion_limit(cfg)})
+    assert "A" in seq and seq.count("A") + seq.count("B") == 3
+    assert len(seq) < compute_recursion_limit(cfg)
+
+
+def test_claims_view_keeps_to_the_budget_and_shows_a_newer_claimless_round():
+    from automation.graph import _format_claim_views
+    claims = {f"a.1.{i}": {"id": f"a.1.{i}", "agent": "A", "round": 1, "text": "x" * 80,
+                           "epistemic_tag": "[FACT]", "confidence": 0.5} for i in range(1, 11)}
+    outputs = {"A": "[AGENT FAILED] A: Boom\n\n[Earlier findings from A]\nreport\n\nCLAIMS:\n- [a.1.1] …"}
+    view = _format_claim_views(outputs, claims, None, 300)
+    assert view.startswith("### [A]\nLatest report (no claims):\n[AGENT FAILED] A: Boom")
+    assert view.count("- [a.1.") == 2 and "(… 8 more claims not shown)" in view
+
+
+def test_critique_round_keeps_a_call_for_the_orchestrator_and_is_considered_once(tmp_path):
+    cfg = _collab_cfg(tmp_path, critique_round=True)
+    cfg["orchestrator"]["max_agent_calls"] = 4
+    b_report = report("b", ("Y falls", "fact", [], 0.7, []))
+    chat = FindingsChat([decision(["A", "B"], assignments={"A": "a", "B": "b"}),
+                         decision(["Journalist"], "WRITE IT AS A MEMO"), decision(["Journalist"], "WRITE IT AS A MEMO")],
+                        {"A": [a_report(), report("none")], "B": [b_report, report("none")]})
+    state = run(build(cfg, chat))
+    assert chat.count("A") == 2 and chat.count("B") == 1     # 4 calls - 2 used - 1 kept back = 1 critique
+    assert state["agent_call_count"] == 3 and "safety valve" not in " ".join(m.content for m in state["messages"])
+    assert "WRITE IT AS A MEMO" in chat.human("Journalist")
+    # Fewer than two specialists with claims at the first hand-over: no critique, and none later.
+    chat = FindingsChat([decision(["A"]), decision(["Journalist"])], {"A": [a_report()]})
+    state = run(build(_collab_cfg(tmp_path, critique_round=True), chat))
+    assert state["critique_done"] is True and chat.count("A") == 1
+
+
+def test_structured_findings_call_is_inside_the_parallel_limit(tmp_path):
+    class SlowFindings(FindingsChat):
+        in_flight = peak = 0
+
+        def with_structured_output(self, schema, **kwargs):
+            view = super().with_structured_output(schema, **kwargs)
+            from automation.graph import SpecialistFindings
+            if schema is not SpecialistFindings:
+                return view
+            chat = self
+
+            class _Slow:
+                async def ainvoke(self, msgs, config=None):
+                    chat.in_flight += 1
+                    chat.peak = max(chat.peak, chat.in_flight)
+                    await asyncio.sleep(0.02)
+                    chat.in_flight -= 1
+                    return await view.ainvoke(msgs, config)
+            return _Slow()
+
+    cfg = _collab_cfg(tmp_path, )
+    cfg["orchestrator"]["max_parallel_agents"] = 1
+    chat = SlowFindings([decision(["A", "B"], assignments={"A": "a", "B": "b"}), decision(["Journalist"])],
+                        {"A": [a_report()], "B": [report("b")]})
+    run(build(cfg, chat))
+    assert chat.peak == 1

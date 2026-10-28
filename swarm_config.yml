@@ -381,6 +381,27 @@ hitl:
 #   type: sqlite
 #   path: "./.murmuration/checkpoints.sqlite"
 
+# ── Collaboration (claim-level findings) ─────────────
+# structured_findings:   after its research, each specialist restates its report as
+#                        claims {text, epistemic_tag, sources, confidence, contradicts}.
+#                        Claims get ids such as litscout.2.3, are logged to the
+#                        traceability matrix with the persona's name, and are what
+#                        the orchestrator and colleagues see (instead of a text slice).
+#                        Tags come from epistemic_tags below. Costs one extra model
+#                        call per specialist turn (default false).
+# surface_disagreements: list claims that dispute each other (via `contradicts`) for
+#                        the orchestrator and ask the Journalist for a "Points of
+#                        disagreement" section (needs structured_findings).
+# critique_round:        before the first hand-over to the Journalist, every specialist
+#                        with claims gets one objections-only pass on its colleagues'
+#                        claims, within max_agent_calls (needs structured_findings).
+# With reviewer.context including matrix, the reviewer also gets a check of the
+# claim ids the draft cites against this run's claims.
+# collaboration:
+#   structured_findings: true
+#   surface_disagreements: true
+#   critique_round: false
+
 # ── Epistemic Tags ───────────────────────────────────
 # Tags used to classify knowledge claims in the traceability matrix.
 # Customize these to fit your domain's epistemology.

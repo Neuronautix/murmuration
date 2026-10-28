@@ -228,6 +228,16 @@ def _check_run_artefacts(report: SwarmDoctorReport, config: dict) -> None:
                 ))
 
 
+def _check_collaboration(report: SwarmDoctorReport, config: dict) -> None:
+    """Structured findings take their tag vocabulary from epistemic_tags."""
+    collaboration = config.get("collaboration") or {}
+    if collaboration.get("structured_findings") and not config.get("epistemic_tags"):
+        report.issues.append(ValidationIssue(
+            "warning", "collaboration.structured_findings is on but epistemic_tags is empty, so claim tags "
+            "are not checked against a vocabulary", "swarm_config.yml",
+        ))
+
+
 def _check_reviewer_routing(report: SwarmDoctorReport, config: dict) -> None:
     """reviewer.on_rejection / context settings that cannot take effect."""
     reviewer = config.get("reviewer") or {}
@@ -478,6 +488,7 @@ def inspect_swarm(root_dir: Path) -> SwarmDoctorReport:
     _check_checkpointer(report, config)
     _check_early_stop(report, orchestrator_block)
     _check_reviewer_routing(report, config)
+    _check_collaboration(report, config)
     _check_traceability_coverage(
         report,
         personas,
