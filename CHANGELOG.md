@@ -37,6 +37,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Traceability provenance** (audit finding B12): matrix rows written by `append_traceability_matrix` name the persona that logged them (specialist, Journalist or orchestrator) instead of `**Auto-Agent**`. The graph node passes the persona name to its tools in the `RunnableConfig` metadata; a call made outside the graph still writes `Auto-Agent`. The tool's arguments are unchanged.
 
 ### Added
+- **`personas[].model`**: any persona (orchestrator and Journalist included) can use its own `{provider, name, temperature, env_key}`, merged over `model` like `reviewer.model` (audit I3). The builder preserves it; `execute` checks each persona's API key.
+- **`orchestrator.max_parallel_agents`** (default `null`, no limit): caps how many specialists run at once when the orchestrator dispatches several in parallel (audit R9).
 - **`swarm.run_log`** (default `false`): a JSON Lines record of every node update — routing decision and reasoning, assignments, reviewer verdict and feedback, HITL answers, token deltas and `final_status` — plus run start and end, including crashes (audit R6).
 - **`swarm.persist_findings`** (default `false`): each specialist's findings are written to `<output_dir>/findings/<persona-slug>.md` as soon as it reports, so a crash before the Journalist keeps them (audit I5).
 - **`orchestrator.on_agent_failure`**: `continue` (default) records a failed agent and keeps going; `abort` stops on the first error.

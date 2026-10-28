@@ -72,7 +72,10 @@ Human-in-the-Loop (HITL)
   the user, and resumes with Command(resume=answer).
 """
 
+import asyncio
+import contextlib
 import re
+import weakref
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -96,6 +99,7 @@ from automation.config import (
     get_persona_config,
     load_config,
     load_tools_for_persona,
+    persona_model_config,
 )
 
 # Characters retained from each peer agent's output when shown to another
@@ -419,6 +423,26 @@ def compute_recursion_limit(config: dict) -> int:
 
 def _failure_policy(config: dict) -> str:
     return config.get("orchestrator", {}).get("on_agent_failure", "continue")
+
+
+class _LoopLocalSemaphore:
+    """An asyncio.Semaphore per running event loop.
+
+    A semaphore binds to the first loop that waits on it, and a compiled graph
+    may be run from several loops (one asyncio.run() per run or resume), so one
+    shared instance would raise "bound to a different event loop".
+    """
+
+    def __init__(self, limit: int):
+        self.limit = limit
+        self._by_loop = weakref.WeakKeyDictionary()
+
+    def get(self) -> asyncio.Semaphore:
+        loop = asyncio.get_running_loop()
+        sem = self._by_loop.get(loop)
+        if sem is None:
+            sem = self._by_loop[loop] = asyncio.Semaphore(self.limit)
+        return sem
 
 
 # ── Orchestrator node (Dr. Nexus) ──────────────────────────────────────────
@@ -757,7 +781,8 @@ def make_on_rejection_node():
 
 # ── Specialist node factory ────────────────────────────────────────────────
 
-def make_specialist_node(persona_name: str, config: dict, model, tools: list, summary_model=None):
+def make_specialist_node(persona_name: str, config: dict, model, tools: list, summary_model=None,
+                         limiter=None):
     """Return an async LangGraph node function for a specialist persona.
 
     The node uses _run_tool_loop_async so that multiple tool calls issued in a
@@ -766,7 +791,8 @@ def make_specialist_node(persona_name: str, config: dict, model, tools: list, su
     tool functions are transparently run in a thread-pool executor by LangChain.
 
     ``summary_model`` is the same model without tools; it writes the final answer
-    if the tool-round budget runs out (defaults to ``model``).
+    if the tool-round budget runs out (defaults to ``model``). ``limiter`` (a
+    _LoopLocalSemaphore) bounds how many specialists run at once.
     """
     persona_cfg = get_persona_config(config, persona_name)
     system_prompt = build_agent_system_prompt(
@@ -797,14 +823,15 @@ def make_specialist_node(persona_name: str, config: dict, model, tools: list, su
             f"RELEVANT FINDINGS FROM COLLEAGUES:\n{peer_findings}"
         ))
         try:
-            response, usage = await _run_tool_loop_async(
-                model, tools,
-                [SystemMessage(content=system_prompt), context],
-                max_rounds,
-                summary_model=summary_model,
-                agent_name=persona_name,
-                config=config,
-            )
+            async with limiter.get() if limiter else contextlib.nullcontext():
+                response, usage = await _run_tool_loop_async(
+                    model, tools,
+                    [SystemMessage(content=system_prompt), context],
+                    max_rounds,
+                    summary_model=summary_model,
+                    agent_name=persona_name,
+                    config=config,
+                )
             final_text = _message_text(response)
             brief = final_text[:150] + "…" if len(final_text) > 150 else final_text
             status = f"[{persona_name}]: {brief}"
@@ -1002,9 +1029,22 @@ def build_graph(config: dict = None):
     # ── Build models once ────────────────────────────────────────────────
     base_model = create_model(config)
     reviewer_model_inst = create_reviewer_model(config)
+    persona_models: dict = {}
+
+    def model_for(persona_name: str):
+        """personas[].model merged over model (like reviewer.model); one client per distinct spec."""
+        merged = persona_model_config(config, get_persona_config(config, persona_name))
+        if merged is None:
+            return base_model
+        key = repr(sorted(merged.items()))
+        if key not in persona_models:
+            persona_models[key] = create_model({**config, "model": merged})
+        return persona_models[key]
+
+    orchestrator_model = model_for(orchestrator_name)
     # include_raw=True keeps the raw AIMessage so the orchestrator's token usage
     # can be counted; _unpack_routing_result() handles both result shapes.
-    orchestrator_routing_model = base_model.with_structured_output(OrchestratorDecision, include_raw=True)
+    orchestrator_routing_model = orchestrator_model.with_structured_output(OrchestratorDecision, include_raw=True)
 
     workflow = StateGraph(GraphState)
 
@@ -1015,28 +1055,38 @@ def build_graph(config: dict = None):
     if config["orchestrator"].get("allow_tools", False) is True:
         orchestrator_tools = load_tools_for_persona(config, get_persona_config(config, orchestrator_name))
         if orchestrator_tools:
-            orchestrator_tool_model = base_model.bind_tools(orchestrator_tools)
+            orchestrator_tool_model = orchestrator_model.bind_tools(orchestrator_tools)
     workflow.add_node(
         "orchestrator",
         make_orchestrator_node(
             config, specialist_names, orchestrator_routing_model,
-            tool_model=orchestrator_tool_model, tools=orchestrator_tools, summary_model=base_model,
+            tool_model=orchestrator_tool_model, tools=orchestrator_tools, summary_model=orchestrator_model,
         ),
     )
 
     # ── Register specialists (each with pre-bound tool set) ──────────────
+    # orchestrator.max_parallel_agents caps how many specialists run their model/tool
+    # loop at once when the orchestrator fans out; the others wait their turn.
+    max_parallel = config["orchestrator"].get("max_parallel_agents")
+    limiter = _LoopLocalSemaphore(max_parallel) if max_parallel else None
     for name in specialist_names:
         persona_cfg = get_persona_config(config, name)
         tools = load_tools_for_persona(config, persona_cfg)
-        specialist_model = base_model.bind_tools(tools) if tools else base_model
-        workflow.add_node(name, make_specialist_node(name, config, specialist_model, tools, base_model))
+        own_model = model_for(name)
+        specialist_model = own_model.bind_tools(tools) if tools else own_model
+        workflow.add_node(
+            name, make_specialist_node(name, config, specialist_model, tools, own_model, limiter=limiter),
+        )
 
     # ── Register journalist ──────────────────────────────────────────────
     journalist_cfg = get_persona_config(config, journalist_name)
     journalist_tools = load_tools_for_persona(config, journalist_cfg)
-    journalist_model = base_model.bind_tools(journalist_tools) if journalist_tools else base_model
+    journalist_own_model = model_for(journalist_name)
+    journalist_model = (
+        journalist_own_model.bind_tools(journalist_tools) if journalist_tools else journalist_own_model
+    )
     workflow.add_node(
-        "Journalist", make_journalist_node(config, journalist_model, journalist_tools, base_model),
+        "Journalist", make_journalist_node(config, journalist_model, journalist_tools, journalist_own_model),
     )
 
     # ── Register reviewer and HITL checkpoint nodes ──────────────────────

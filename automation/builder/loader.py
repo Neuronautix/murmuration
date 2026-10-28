@@ -67,7 +67,7 @@ def load_swarm_spec_from_disk(root_dir: Path) -> SwarmSpec:
                 fallback_icon=persona.get("icon", "🤖"),
                 fallback_role=persona.get("role", "Role"),
                 tools=persona.get("tools", []),
-            )
+            ).model_copy(update={"model": persona.get("model") or None})
         )
 
     reviewer = config.get("reviewer", {})

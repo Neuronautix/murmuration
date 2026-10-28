@@ -75,6 +75,43 @@ def _validate_options(config: dict) -> None:
     if persist is not None and not isinstance(persist, bool):
         raise ValueError(f"swarm_config.yml: swarm.persist_findings must be true or false, not {persist!r}.")
 
+    for persona in config.get("personas") or []:
+        if not isinstance(persona, dict):
+            continue  # malformed entries are reported by doctor / fail in get_persona_config
+        _validate_model_override(persona.get("model"), f"personas[{persona.get('name', '?')}].model")
+
+
+SUPPORTED_PROVIDERS = ("openai", "anthropic", "google")
+# The variable each provider's LangChain client reads its API key from.
+PROVIDER_ENV_KEYS = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "google": "GOOGLE_API_KEY"}
+MODEL_OVERRIDE_KEYS = ("provider", "name", "temperature", "env_key")
+
+
+def _validate_model_override(override, path: str) -> None:
+    """A per-persona model block: a mapping of provider/name/temperature/env_key (all optional)."""
+    if override is None:
+        return
+    if not isinstance(override, dict):
+        raise ValueError(f"swarm_config.yml: {path} must be a mapping such as {{name: gpt-4o-mini}}.")
+    unknown = sorted(set(override) - set(MODEL_OVERRIDE_KEYS))
+    if unknown:
+        raise ValueError(
+            f"swarm_config.yml: {path}.{unknown[0]} is not supported; use {', '.join(MODEL_OVERRIDE_KEYS)}."
+        )
+    if "provider" in override and override["provider"] not in SUPPORTED_PROVIDERS:
+        raise ValueError(
+            f"swarm_config.yml: {path}.provider must be one of {', '.join(SUPPORTED_PROVIDERS)}, "
+            f"not {override['provider']!r}."
+        )
+    for key in ("name", "env_key"):
+        if key in override and not (isinstance(override[key], str) and override[key].strip()):
+            raise ValueError(f"swarm_config.yml: {path}.{key} must be a non-empty string.")
+    temperature = override.get("temperature")
+    if "temperature" in override and (
+        isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not 0 <= temperature <= 2
+    ):
+        raise ValueError(f"swarm_config.yml: {path}.temperature must be a number between 0 and 2.")
+
 
 def _validate_orchestrator_options(orchestrator: dict) -> None:
     """Reject orchestrator options whose type or value the graph cannot use."""
@@ -88,6 +125,13 @@ def _validate_orchestrator_options(orchestrator: dict) -> None:
     if not isinstance(allow_tools, bool):
         raise ValueError(
             f"swarm_config.yml: orchestrator.allow_tools must be true or false, not {allow_tools!r}."
+        )
+    max_parallel = orchestrator.get("max_parallel_agents")
+    if max_parallel is not None and (isinstance(max_parallel, bool) or not isinstance(max_parallel, int)
+                                     or max_parallel < 1):
+        raise ValueError(
+            f"swarm_config.yml: orchestrator.max_parallel_agents must be a whole number of at least 1 "
+            f"or null (no limit), not {max_parallel!r}."
         )
 
 
@@ -344,6 +388,24 @@ def create_model(config: dict) -> Any:
         )
 
 
+def persona_model_config(config: dict, persona_cfg: dict) -> dict | None:
+    """The model spec for one persona: ``personas[].model`` merged over ``model``.
+
+    Returns None when the persona has no override, so callers can share the base
+    model instance. Works like ``reviewer.model``: only the keys that differ need
+    to be given.
+    """
+    override = persona_cfg.get("model")
+    if not override:
+        return None
+    merged = {**config["model"], **override}
+    # A provider switch without its own env_key checks that provider's standard
+    # variable, not the base model's (which belongs to another provider).
+    if "env_key" not in override and merged.get("provider") != config["model"].get("provider", "openai"):
+        merged["env_key"] = PROVIDER_ENV_KEYS.get(merged.get("provider"), merged.get("env_key"))
+    return merged
+
+
 def create_reviewer_model(config: dict) -> Any:
     """Create an LLM instance for Reviewer-2, with optional model/temperature override.
 
@@ -399,6 +461,19 @@ def validate_env(config: dict) -> list[str]:
             f"Required environment variable '{required_key}' is not set.\n"
             f"Copy .env.example to .env and add your API key."
         )
+
+    # Personas with their own model (personas[].model) may need a different key.
+    for persona in config.get("personas", []):
+        merged = persona_model_config(config, persona)
+        if merged is None:
+            continue
+        persona_key = merged.get("env_key", "OPENAI_API_KEY")
+        if not os.getenv(persona_key):
+            raise EnvironmentError(
+                f"Environment variable '{persona_key}' is not set; persona '{persona.get('name')}' "
+                f"uses it for its own model (personas[].model).\n"
+                f"Add it to .env, or set personas[].model.env_key."
+            )
 
     # Check tool-specific optional keys — map function name → env var.
     # Collect tool names per missing key to emit one consolidated warning each.

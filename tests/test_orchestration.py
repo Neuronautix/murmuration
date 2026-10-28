@@ -1389,3 +1389,184 @@ def test_builder_round_trip_preserves_allow_tools(tmp_path):
         (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
         out = yaml.safe_load(render_swarm_config(load_swarm_spec_from_disk(tmp_path)))
         assert out["orchestrator"]["allow_tools"] is value
+
+
+# ── 13. Per-persona models and fan-out limit (I3, R9) ──────────────────────
+
+
+def build_with_models(config, chats, reviewer=None, tools_for=None):
+    """Like build(), but create_model returns ``chats[model name]`` and records each merged spec."""
+    specs = []
+
+    def fake_create_model(cfg):
+        specs.append(dict(cfg["model"]))
+        return chats[cfg["model"]["name"]]
+
+    tools_for = tools_for or {}
+    with patch("automation.graph.create_model", side_effect=fake_create_model), \
+         patch("automation.graph.create_reviewer_model", return_value=reviewer or FakeReviewer()), \
+         patch("automation.config.load_persona_content", return_value="persona"), \
+         patch("automation.graph.load_tools_for_persona", side_effect=lambda c, p: tools_for.get(p["name"], [])):
+        return build_graph(config), specs
+
+
+def test_persona_model_override_is_merged_and_used_by_that_persona_only():
+    cfg = make_config(specialists=("A", "B"))
+    cfg["personas"][1]["model"] = {"name": "small"}
+    cfg["personas"][-1]["model"] = {"name": "big", "temperature": 0.5}
+    base = FakeChat([decision(["A", "B"], assignments={"A": "a", "B": "b"}), decision(["Journalist"])])
+    small, big = FakeChat([decision(["Journalist"])]), FakeChat([decision(["Journalist"])])
+    graph, specs = build_with_models(cfg, {"m": base, "small": small, "big": big})
+    run(graph)
+    assert [n for n, _ in small.calls] == ["A"]
+    assert [n for n, _ in big.calls] == ["Journalist"]
+    assert [n for n, _ in base.calls] == ["B"] and len(base.router.calls) == 2
+    assert {"provider": "openai", "name": "small", "temperature": 0, "env_key": "K"} in specs
+    assert {"provider": "openai", "name": "big", "temperature": 0.5, "env_key": "K"} in specs
+
+
+def test_orchestrator_model_override_routes_with_that_model():
+    cfg = make_config()
+    cfg["personas"][0]["model"] = {"name": "router"}
+    base, router = FakeChat([decision(["Journalist"])]), FakeChat([decision(["A"]), decision(["Journalist"])])
+    graph, _ = build_with_models(cfg, {"m": base, "router": router})
+    run(graph)
+    assert base.router is None and len(router.router.calls) == 2
+    assert [n for n, _ in base.calls] == ["A", "Journalist"]
+
+
+def test_personas_with_the_same_model_override_share_one_client():
+    cfg = make_config(specialists=("A", "B"))
+    cfg["personas"][1]["model"] = {"name": "small"}
+    cfg["personas"][2]["model"] = {"name": "small"}
+    small = FakeChat([decision(["Journalist"])])
+    _, specs = build_with_models(cfg, {"m": FakeChat([decision(["Journalist"])]), "small": small})
+    assert [s["name"] for s in specs] == ["m", "small"]
+
+
+@pytest.mark.parametrize("override, message", [
+    ("gpt-4o-mini", r"personas\[Specialist1\]\.model must be a mapping"),
+    ({"name": "x", "max_tokens": 5}, r"personas\[Specialist1\]\.model\.max_tokens is not supported"),
+    ({"provider": "mistral"}, r"personas\[Specialist1\]\.model\.provider"),
+    ({"temperature": 3}, r"personas\[Specialist1\]\.model\.temperature"),
+    ({"name": ""}, r"personas\[Specialist1\]\.model\.name"),
+])
+def test_load_config_rejects_bad_persona_models(tmp_path, override, message):
+    import yaml
+
+    from automation.config import CONFIG_PATH, load_config
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["personas"][1]["model"] = override
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        load_config(tmp_path / "swarm_config.yml")
+    real["personas"][1]["model"] = {"provider": "anthropic", "name": "claude-x", "env_key": "ANTHROPIC_API_KEY"}
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    load_config(tmp_path / "swarm_config.yml")
+
+
+def test_validate_env_checks_persona_model_keys(monkeypatch):
+    from automation.config import validate_env
+    cfg = make_config()
+    cfg["personas"][1]["model"] = {"provider": "anthropic", "name": "c", "env_key": "PERSONA_ONLY_KEY"}
+    monkeypatch.setenv("K", "x")
+    monkeypatch.delenv("PERSONA_ONLY_KEY", raising=False)
+    with pytest.raises(EnvironmentError, match="PERSONA_ONLY_KEY.*persona 'A'"):
+        validate_env(cfg)
+    monkeypatch.setenv("PERSONA_ONLY_KEY", "y")
+    validate_env(cfg)
+
+
+def test_provider_switch_without_env_key_checks_that_providers_key(tmp_path, monkeypatch):
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH, validate_env
+    cfg = make_config()
+    cfg["personas"][1]["model"] = {"provider": "anthropic", "name": "claude-x"}
+    monkeypatch.setenv("K", "x")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with pytest.raises(EnvironmentError, match="ANTHROPIC_API_KEY.*persona 'A'"):
+        validate_env(cfg)
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["personas"][1]["model"] = {"provider": "anthropic", "name": "claude-x"}
+    real["personas"][2]["model"] = {"name": "gpt-4o-mini"}       # same key as the base: no extra warning
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    warnings = [i.message for i in inspect_swarm(tmp_path).issues if i.severity == "warning"]
+    persona_key_warnings = [m for m in warnings if "for persona" in m]
+    assert persona_key_warnings == ["model env key 'ANTHROPIC_API_KEY' for persona 'Specialist1' is not set "
+                                    "in the current shell"]
+
+
+def test_builder_round_trips_persona_models(tmp_path):
+    import shutil
+    from pathlib import Path
+
+    import yaml
+
+    from automation.builder.generator import render_swarm_config
+    from automation.builder.loader import load_swarm_spec_from_disk
+    root = Path(__file__).resolve().parents[1]
+    cfg = yaml.safe_load((root / "examples/toxicology/swarm_config.yml").read_text(encoding="utf-8"))
+    override = {"provider": "anthropic", "name": "claude-x", "temperature": 0.3, "env_key": "ANTHROPIC_API_KEY"}
+    cfg["personas"][2]["model"] = override
+    cfg["orchestrator"]["max_parallel_agents"] = 2
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    shutil.copytree(root / "examples/toxicology", tmp_path / "examples/toxicology")
+    out = yaml.safe_load(render_swarm_config(load_swarm_spec_from_disk(tmp_path)))
+    assert out["personas"][2]["model"] == override
+    assert all("model" not in p for i, p in enumerate(out["personas"]) if i != 2)
+    assert out["orchestrator"]["max_parallel_agents"] == 2
+
+
+class ConcurrencyChat(FakeChat):
+    """Tracks how many specialist model calls are in flight at once."""
+
+    def __init__(self, decisions, specialists):
+        super().__init__(decisions)
+        self.specialists, self.in_flight, self.peak = set(specialists), 0, 0
+
+    async def ainvoke(self, msgs, _bound=False, **kwargs):
+        if self.persona(msgs) not in self.specialists:
+            return await super().ainvoke(msgs, _bound=_bound)
+        self.in_flight += 1
+        self.peak = max(self.peak, self.in_flight)
+        await asyncio.sleep(0.02)
+        self.in_flight -= 1
+        return await super().ainvoke(msgs, _bound=_bound)
+
+
+@pytest.mark.parametrize("limit, peak", [(None, 3), (1, 1), (2, 2)])
+def test_max_parallel_agents_caps_concurrent_specialists(limit, peak):
+    names = ("A", "B", "C")
+    cfg = make_config(specialists=names)
+    cfg["orchestrator"]["max_parallel_agents"] = limit
+    plan = decision(list(names), assignments={n: n for n in names})
+    chat = ConcurrencyChat([], names)
+    graph = build(cfg, chat)
+    for _ in range(2):          # a second asyncio.run() on the same graph uses a new event loop
+        chat.router.decisions[:] = [plan, decision(["Journalist"])]
+        chat.peak = 0
+        state = run(graph)
+        assert chat.peak == peak
+        assert sorted(k for k in state["agent_outputs"] if k in names) == list(names)
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "2"])
+def test_load_config_rejects_bad_max_parallel_agents(tmp_path, value):
+    import yaml
+
+    from automation.config import CONFIG_PATH, load_config
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["orchestrator"]["max_parallel_agents"] = value
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    with pytest.raises(ValueError, match="orchestrator.max_parallel_agents"):
+        load_config(tmp_path / "swarm_config.yml")
+
+
+def test_recursion_limit_ignores_max_parallel_agents():
+    from automation.graph import compute_recursion_limit
+    cfg = make_config()
+    cfg["orchestrator"]["max_parallel_agents"] = 1
+    assert compute_recursion_limit(cfg) == compute_recursion_limit(make_config())

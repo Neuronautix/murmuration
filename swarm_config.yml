@@ -52,6 +52,9 @@ swarm:
 #                           checks before each routing decision, bounded by
 #                           max_tool_rounds_per_agent (default false: its tools
 #                           are not loaded and it only routes)
+# max_parallel_agents:      how many specialists may run at once when the orchestrator
+#                           dispatches several in parallel; the rest wait their
+#                           turn (default null: no limit). Helps with rate limits.
 orchestrator:
   agent: "Orchestrator"
   journalist: "Journalist"
@@ -61,6 +64,7 @@ orchestrator:
   # max_peer_chars: 600
   # on_agent_failure: continue
   # allow_tools: false
+  # max_parallel_agents: 3
 
 # ── LLM Backend ─────────────────────────────────────
 # Supported providers: openai, anthropic, google
@@ -85,6 +89,20 @@ model:
 # To add a persona: python -m automation.main persona add
 # To edit a persona: python -m automation.main persona edit
 # To preview the team: python -m automation.main preview
+#
+# Optional per-persona model: add a `model:` block to any persona (orchestrator
+# and Journalist included). It is merged over the `model:` section below, like
+# reviewer.model, so give only what differs. Keys: provider, name, temperature,
+# env_key. Example — a cheaper model for a narrow specialist:
+#   - name: "LitScout"
+#     ...
+#     model:
+#       name: "gpt-4o-mini"
+#       temperature: 0.1
+# env_key only names the variable `execute` checks; the client reads its provider's
+# standard variable. Switching provider without env_key checks that provider's
+# standard variable (OPENAI_API_KEY, ANTHROPIC_API_KEY or GOOGLE_API_KEY).
+# The cost estimate in run_metrics.json still uses model.pricing for every token.
 personas:
   - name: "Orchestrator"
     icon: "👑"

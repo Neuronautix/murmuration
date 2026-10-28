@@ -9,7 +9,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from automation.config import build_journalist_brief, findings_slug, get_run_log_path, load_config
+from automation.config import (
+    build_journalist_brief,
+    findings_slug,
+    get_run_log_path,
+    load_config,
+    persona_model_config,
+)
 
 console = Console()
 
@@ -219,6 +225,21 @@ def _check_run_artefacts(report: SwarmDoctorReport, config: dict) -> None:
                 ))
 
 
+def _check_persona_models(report: SwarmDoctorReport, config: dict) -> None:
+    """personas[].model: flag API keys missing from the shell (the base key is checked separately)."""
+    base_key = (config.get("model") or {}).get("env_key", "OPENAI_API_KEY")
+    for persona in config.get("personas", []):
+        merged = persona_model_config(config, persona) if isinstance(persona, dict) else None
+        if merged is None:
+            continue
+        name = persona.get("name", "")
+        env_key = merged.get("env_key", "OPENAI_API_KEY")
+        if env_key != base_key and not os.getenv(env_key):
+            report.issues.append(ValidationIssue(
+                "warning", f"model env key '{env_key}' for persona '{name}' is not set in the current shell", ".env",
+            ))
+
+
 def _check_reviewer_semantics(report: SwarmDoctorReport, reviewer: dict) -> None:
     reviewer_enabled = reviewer.get("enabled", True)
     max_revision_loops = reviewer.get("max_revision_loops", 3)
@@ -378,6 +399,7 @@ def inspect_swarm(root_dir: Path) -> SwarmDoctorReport:
     _check_reviewer_semantics(report, reviewer)
     _check_journalist_brief(report, config)
     _check_run_artefacts(report, config)
+    _check_persona_models(report, config)
     _check_traceability_coverage(
         report,
         personas,

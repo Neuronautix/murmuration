@@ -26,6 +26,9 @@ class PersonaSpec(BaseModel):
     core_mission: str
     kb_focus: list[str] = Field(default_factory=list)
     behavior_rules: list[str] = Field(default_factory=list)
+    # Optional personas[].model override ({provider, name, temperature, env_key}), merged
+    # over the swarm model at runtime. Modelled explicitly: extra_config does not reach list items.
+    model: dict[str, Any] | None = None
 
     @field_validator("name", "role", "core_mission")
     @classmethod
@@ -218,6 +221,7 @@ class SwarmSpec(BaseModel):
                     "role": persona.role,
                     "persona_file": persona.persona_file,
                     "tools": persona.tools,
+                    **({"model": dict(persona.model)} if persona.model else {}),
                 }
                 for persona in self.personas
             ],
