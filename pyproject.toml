@@ -32,6 +32,7 @@ dependencies = [
     "requests>=2.31",
     "beautifulsoup4>=4.12",
     "pydantic>=2.0",
+    "jsonschema>=4.18",
 ]
 
 [project.urls]
@@ -54,6 +55,9 @@ swarm = "automation.main:app"
 
 [tool.setuptools.packages.find]
 include = ["automation*"]
+
+[tool.setuptools.package-data]
+"automation.exporters" = ["schemas/*.json", "schemas/*.txt"]
 
 [tool.ruff]
 line-length = 120

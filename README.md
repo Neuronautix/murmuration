@@ -326,6 +326,16 @@ To contribute a complete example for another domain, see [CONTRIBUTING.md](CONTR
 
 ---
 
+## Publish a review for Open Review Atlas
+
+Export a completed swarm report and traceability matrix with
+`python -m automation.exporters.oratlas --run path/to/run --out path/to/review-repo --repository-url https://github.com/owner/review-repo --title "Review title" --abstract "Review abstract" --license CC-BY-4.0`.
+Validate with `python -m automation.exporters.oratlas --check --out path/to/review-repo`,
+commit the manifest and knowledge artifacts, then tag and publish a GitHub
+release. Optionally archive the release with Zenodo and add its assigned version
+and concept DOIs. [Export instructions and limitations](docs/oratlas-export.md)
+explain the input layout, skipped records and ORAtlas ingestion verification.
+
 ## Tips for Effective Swarms
 
 See [TIPS.md](TIPS.md) for a detailed guide on:

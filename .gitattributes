@@ -1,0 +1,2 @@
+automation/exporters/schemas/*.json text eol=lf
+tests/fixtures/oratlas/** text eol=lf
