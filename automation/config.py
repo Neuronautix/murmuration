@@ -49,12 +49,7 @@ def load_config(config_path: Path = CONFIG_PATH) -> dict:
             f"Please refer to the example configuration."
         )
 
-    failure_policy = (config.get("orchestrator") or {}).get("on_agent_failure", "continue")
-    if failure_policy not in ("continue", "abort"):
-        raise ValueError(
-            f"swarm_config.yml: orchestrator.on_agent_failure must be 'continue' or 'abort', "
-            f"not {failure_policy!r}."
-        )
+    _validate_orchestrator_options(config.get("orchestrator") or {})
 
     journalist = config.get("journalist")
     if journalist is not None:
@@ -79,6 +74,26 @@ def _validate_options(config: dict) -> None:
     persist = swarm.get("persist_findings")
     if persist is not None and not isinstance(persist, bool):
         raise ValueError(f"swarm_config.yml: swarm.persist_findings must be true or false, not {persist!r}.")
+
+
+def _validate_orchestrator_options(orchestrator: dict) -> None:
+    """Reject orchestrator options whose type or value the graph cannot use."""
+    failure_policy = orchestrator.get("on_agent_failure", "continue")
+    if failure_policy not in ("continue", "abort"):
+        raise ValueError(
+            f"swarm_config.yml: orchestrator.on_agent_failure must be 'continue' or 'abort', "
+            f"not {failure_policy!r}."
+        )
+    allow_tools = orchestrator.get("allow_tools", False)
+    if not isinstance(allow_tools, bool):
+        raise ValueError(
+            f"swarm_config.yml: orchestrator.allow_tools must be true or false, not {allow_tools!r}."
+        )
+
+
+# RunnableConfig metadata key carrying the calling persona's name from a graph node
+# to its tools (read by append_traceability_matrix for the matrix's Author/Agent column).
+AGENT_METADATA_KEY = "murmuration_agent"
 
 
 SWARM_PATH_DEFAULTS = {

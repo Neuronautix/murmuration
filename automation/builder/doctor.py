@@ -70,6 +70,7 @@ def _check_routing_semantics(
     journalist_name: str,
     max_agent_calls: int,
     max_tool_rounds: int,
+    allow_orchestrator_tools: bool = False,
 ) -> None:
     persona_map = {persona.get("name", ""): persona for persona in personas}
     specialists = [
@@ -107,7 +108,18 @@ def _check_routing_semantics(
     orchestrator = persona_map.get(orchestrator_name)
     journalist = persona_map.get(journalist_name)
 
-    if orchestrator and not _has_any_tool(orchestrator, DISCOVERY_TOOLS):
+    # The orchestrator's tools are only loaded with orchestrator.allow_tools: true, so the
+    # two warnings below are exclusive: unused tools when off, missing discovery tools when on.
+    if orchestrator and not allow_orchestrator_tools and orchestrator.get("tools"):
+        report.issues.append(
+            ValidationIssue(
+                "warning",
+                f"orchestrator '{orchestrator_name}' lists tools {list(orchestrator['tools'])}, but they are "
+                "ignored unless orchestrator.allow_tools: true",
+                "swarm_config.yml",
+            )
+        )
+    if orchestrator and allow_orchestrator_tools and not _has_any_tool(orchestrator, DISCOVERY_TOOLS):
         report.issues.append(
             ValidationIssue(
                 "warning",
@@ -361,6 +373,7 @@ def inspect_swarm(root_dir: Path) -> SwarmDoctorReport:
         journalist_name=journalist,
         max_agent_calls=orchestrator_block.get("max_agent_calls", 0),
         max_tool_rounds=orchestrator_block.get("max_tool_rounds_per_agent", 0),
+        allow_orchestrator_tools=orchestrator_block.get("allow_tools", False) is True,
     )
     _check_reviewer_semantics(report, reviewer)
     _check_journalist_brief(report, config)

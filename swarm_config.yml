@@ -48,6 +48,10 @@ swarm:
 # on_agent_failure:         what to do when an agent's model call fails (default
 #                           "continue": record the failure and keep the other
 #                           findings; "abort": stop the run on the first error)
+# allow_tools:              let the orchestrator persona use its own tools for quick
+#                           checks before each routing decision, bounded by
+#                           max_tool_rounds_per_agent (default false: its tools
+#                           are not loaded and it only routes)
 orchestrator:
   agent: "Orchestrator"
   journalist: "Journalist"
@@ -56,6 +60,7 @@ orchestrator:
   # max_findings_chars: 1500
   # max_peer_chars: 600
   # on_agent_failure: continue
+  # allow_tools: false
 
 # ── LLM Backend ─────────────────────────────────────
 # Supported providers: openai, anthropic, google

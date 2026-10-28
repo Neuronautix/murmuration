@@ -25,9 +25,11 @@ Built-in Tools:
 import os
 import re
 import subprocess
+import threading
 from pathlib import Path
 
 import requests
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 # ═══════════════════════════════════════════════════════
@@ -558,6 +560,7 @@ def write_manuscript_section(section_name: str, content: str) -> str:
 
 
 _MATRIX_HEADER_SENTINEL = "| Source |"  # first cell of the expected table header
+_MATRIX_LOCK = threading.Lock()
 
 
 def _md_cell(value) -> str:
@@ -565,8 +568,18 @@ def _md_cell(value) -> str:
     return " ".join(str(value).split()).replace("|", "\\|")
 
 
+def _calling_agent(config: RunnableConfig | None) -> str:
+    """Persona that issued the tool call, as set by the graph node; 'Auto-Agent' if unknown."""
+    from automation.config import AGENT_METADATA_KEY
+
+    name = ((config or {}).get("metadata") or {}).get(AGENT_METADATA_KEY)
+    return str(name) if name else "Auto-Agent"
+
+
+# `config` is injected by LangChain (it is annotated RunnableConfig) and is not part of the
+# schema the model sees; the graph puts the calling persona's name in its metadata.
 @tool
-def append_traceability_matrix(fact: str, source: str, epistemic_tag: str) -> str:
+def append_traceability_matrix(fact: str, source: str, epistemic_tag: str, config: RunnableConfig) -> str:
     """Logs a documented fact and its source into the Knowledge Traceability Matrix.
     Use this IMMEDIATELY after using search tools to secure the epistemic integrity trail.
 
@@ -603,11 +616,13 @@ def append_traceability_matrix(fact: str, source: str, epistemic_tag: str) -> st
 
     try:
         new_row = (
-            f"| *Live Search:* {_md_cell(source)} | **Auto-Agent** | "
+            f"| *Live Search:* {_md_cell(source)} | **{_md_cell(_calling_agent(config))}** | "
             f"{_md_cell(fact)} | Automatically sourced and summarized via Tool API. | "
             f"**{_md_cell(epistemic_tag)}** |\n"
         )
-        with open(filepath, "a", encoding="utf-8") as f:
+        # Parallel specialists call this from a shared thread pool; on Windows an
+        # append is seek-then-write, so unserialised appends can overwrite each other.
+        with _MATRIX_LOCK, open(filepath, "a", encoding="utf-8") as f:
             f.write(new_row)
         return f"SUCCESS: Logged '{epistemic_tag}' finding to Traceability Matrix."
     except Exception as e:

@@ -23,6 +23,9 @@ orchestrator:
   journalist: "Journalist"
   max_agent_calls: 8
   max_tool_rounds_per_agent: 5
+  # Let the orchestrator persona run quick checks with its listed tools before each
+  # routing decision; without this its tools are ignored (see doctor).
+  allow_tools: true
 
 # ── LLM Backend ─────────────────────────────────────
 # Supported providers: openai, anthropic, google

@@ -25,6 +25,7 @@ Graph topology
 Token strategy (per call)
 --------------------------
   Orchestrator  : its persona prompt + findings capped at max_findings_chars each
+                  (+ a quick-check tool loop when orchestrator.allow_tools is true)
   Specialist    : its persona prompt + task + per-agent orchestrator instructions
                   + peer findings capped at max_peer_chars each
   Journalist    : its persona prompt + task + full uncompressed findings
@@ -75,6 +76,8 @@ import re
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables.config import run_in_executor
 from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -83,6 +86,7 @@ from langgraph.types import Command, Send, interrupt  # noqa: F401 (Command re-e
 from pydantic import BaseModel
 
 from automation.config import (
+    AGENT_METADATA_KEY,
     build_agent_system_prompt,
     build_journalist_brief,
     build_reviewer_prompt,
@@ -286,8 +290,24 @@ def _digest_tool_transcript(transcript: list) -> str:
     return "\n\n".join(parts) if parts else "(no tool results were returned)"
 
 
+def _tool_run_config(parent: dict | None, agent_name: str | None) -> dict | None:
+    """Config for a ToolNode call: the node's own config plus the calling persona.
+
+    Passed explicitly because on Python < 3.11 the node's config does not reach
+    nested runnables through context variables. A config given to ``ainvoke``
+    replaces the parent's ``metadata`` mapping rather than merging it, so the
+    parent's metadata is merged here. ``run_id`` belongs to the node's own run.
+    """
+    if parent is None and not agent_name:
+        return None
+    cfg = {k: v for k, v in (parent or {}).items() if k != "run_id"}
+    if agent_name:
+        cfg["metadata"] = {**(cfg.get("metadata") or {}), AGENT_METADATA_KEY: agent_name}
+    return cfg
+
+
 async def _run_tool_loop_async(model, tools: list, messages: list, max_rounds: int,
-                               summary_model=None):
+                               summary_model=None, agent_name: str = None, config: dict = None):
     """Run the agent ↔ tools loop until the model stops calling tools.
 
     Uses model.ainvoke and ToolNode.ainvoke so that multiple tool calls issued
@@ -301,9 +321,14 @@ async def _run_tool_loop_async(model, tools: list, messages: list, max_rounds: i
     call asks for the final answer from the tool results gathered so far.
     Without this the agent's last message is a bare tool call with no text.
 
+    ``agent_name`` is passed to the tools in the RunnableConfig metadata (see
+    _tool_run_config) so that, e.g., traceability rows record which persona
+    logged them. ``config`` is the calling node's RunnableConfig.
+
     Returns (final_response, accumulated_token_usage).
     """
     tool_executor = ToolNode(tools, handle_tool_errors=True) if tools else None
+    tool_config = _tool_run_config(config, agent_name)
     base = list(messages)
     transcript: list = []
     response = None
@@ -314,7 +339,7 @@ async def _run_tool_loop_async(model, tools: list, messages: list, max_rounds: i
         _add_usage(usage, response)
         if not getattr(response, "tool_calls", None) or tool_executor is None:
             return response, usage
-        tool_result = await tool_executor.ainvoke({"messages": base + transcript})
+        tool_result = await tool_executor.ainvoke({"messages": base + transcript}, config=tool_config)
         transcript.extend(tool_result["messages"])
 
     if summary_model is None:
@@ -399,14 +424,22 @@ def _failure_policy(config: dict) -> str:
 # ── Orchestrator node (Dr. Nexus) ──────────────────────────────────────────
 
 def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
-                           hitl_cfg: dict = None):
+                           hitl_cfg: dict = None, tool_model=None, tools: list = None,
+                           summary_model=None):
     """Build the orchestrator node that routes work between specialists.
 
     The node only decides; HITL checkpoints are separate nodes (see
     make_post_plan_node / make_pre_journalist_node). ``hitl_cfg`` is accepted
     for backwards compatibility and ignored.
+
+    Without ``tools`` (the default, ``orchestrator.allow_tools: false``) this is
+    a plain synchronous node. With ``tools`` and a ``tool_model`` bound to them,
+    the node is async: before each routing decision (not on the safety-valve
+    pass) the orchestrator persona runs a bounded tool loop for quick checks,
+    and its short report is added to the routing prompt.
     """
-    nexus_cfg = get_persona_config(config, config["orchestrator"]["agent"])
+    orchestrator_name = config["orchestrator"]["agent"]
+    nexus_cfg = get_persona_config(config, orchestrator_name)
     system_prompt = build_agent_system_prompt(nexus_cfg)
     max_calls = config["orchestrator"].get("max_agent_calls", 8)
     max_findings_chars = config["orchestrator"].get("max_findings_chars", MAX_FINDINGS_CHARS)
@@ -417,10 +450,20 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
     valid_targets = set(specialist_names) | {journalist_name, "Journalist"}
     specialist_set = set(specialist_names)
 
-    def orchestrator_node(state: GraphState):
-        call_count = state.get("agent_call_count", 0)
+    def routing_context(state: GraphState) -> tuple:
         agent_outputs = state.get("agent_outputs", {})
         already_consulted = list(agent_outputs.keys())
+        findings = _format_findings(agent_outputs, compress=True, max_chars=max_findings_chars)
+        consulted_note = (
+            f"SPECIALISTS ALREADY CONSULTED: {', '.join(already_consulted)}"
+            if already_consulted else "No specialists consulted yet."
+        )
+        return findings, consulted_note
+
+    def route(state: GraphState, quick_checks: str = "", check_usage: dict = None,
+              check_notes: list = ()):
+        call_count = state.get("agent_call_count", 0)
+        agent_outputs = state.get("agent_outputs", {})
 
         if call_count >= max_calls:
             instructions = (
@@ -440,16 +483,18 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
                 "token_usage": {},
             }
 
-        findings = _format_findings(agent_outputs, compress=True, max_chars=max_findings_chars)
-        consulted_note = (
-            f"SPECIALISTS ALREADY CONSULTED: {', '.join(already_consulted)}"
-            if already_consulted else "No specialists consulted yet."
+        findings, consulted_note = routing_context(state)
+        # Empty unless orchestrator.allow_tools is on, so the default prompt is unchanged.
+        checks_block = (
+            f"YOUR QUICK CHECKS (your own tool results, gathered before this decision):\n{quick_checks}\n\n"
+            if quick_checks else ""
         )
 
         routing_prompt = (
             f"RESEARCH TASK:\n{state['task']}\n\n"
             f"{consulted_note}\n\n"
             f"FINDINGS COLLECTED SO FAR:\n{findings}\n\n"
+            f"{checks_block}"
             f"ALL AVAILABLE SPECIALISTS: {', '.join(specialist_names)}\n\n"
             "Decide the next step:\n"
             "  • Route to one specialist for sequential deep investigation.\n"
@@ -463,7 +508,7 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             "assignments (list of {agent, instructions} for parallel dispatch)."
         )
 
-        routing_notes = []
+        routing_notes = list(check_notes)
         try:
             decision, round_usage = _unpack_routing_result(routing_model.invoke([
                 SystemMessage(content=system_prompt),
@@ -529,13 +574,64 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             "messages": [AIMessage(content=(
                 f"[Orchestrator → {valid_next}]: {decision.reasoning}{notes}"
             ))],
-            "token_usage": round_usage,
+            "token_usage": _merge_token_usage(round_usage, check_usage) if check_usage else round_usage,
         }
         if not specialist_dispatches:
             update["journalist_instructions"] = assignments_dict.get("Journalist") or decision.instructions
         return update
 
-    return orchestrator_node
+    if not tools:
+        def orchestrator_node(state: GraphState):
+            return route(state)
+
+        return orchestrator_node
+
+    # ── orchestrator.allow_tools: a bounded tool loop before each routing decision ──
+    checks_system_prompt = build_agent_system_prompt(
+        nexus_cfg,
+        epistemic_tags=config.get("epistemic_tags"),
+        tool_names=[getattr(t, "name", "") for t in tools],
+    )
+    max_rounds = config["orchestrator"].get("max_tool_rounds_per_agent", 5)
+    summary_model = summary_model or tool_model
+
+    async def orchestrator_with_tools_node(state: GraphState, config: RunnableConfig = None):
+        if state.get("agent_call_count", 0) >= max_calls:
+            return route(state)   # safety valve: no checks, straight to the Journalist
+
+        findings, consulted_note = routing_context(state)
+        request = HumanMessage(content=(
+            f"RESEARCH TASK:\n{state['task']}\n\n"
+            f"{consulted_note}\n\n"
+            f"FINDINGS COLLECTED SO FAR:\n{findings}\n\n"
+            f"ALL AVAILABLE SPECIALISTS: {', '.join(specialist_names)}\n\n"
+            "Before you decide the next step, run a few quick checks with your tools that help decide "
+            "which specialists to consult next, or whether the evidence is already sufficient. Do not do "
+            "the specialists' work. Then reply with a short report of what you checked and found."
+        ))
+        quick_checks, usage, notes = "", {}, []
+        try:
+            response, usage = await _run_tool_loop_async(
+                tool_model, tools,
+                [SystemMessage(content=checks_system_prompt), request],
+                max_rounds,
+                summary_model=summary_model,
+                agent_name=orchestrator_name,
+                config=config,
+            )
+            quick_checks = _message_text(response).strip()
+        except GraphBubbleUp:
+            raise
+        except Exception as e:
+            if failure_policy == "abort":
+                raise
+            notes.append(f"quick checks failed ({type(e).__name__}: {e}); routed without them")
+        # The routing call is synchronous (as in the default node); keep it off the event loop.
+        # run_in_executor(config, …) carries the node's callbacks, which a bare thread loses on
+        # Python 3.10 (no context-var propagation into async nodes there).
+        return await run_in_executor(config, route, state, quick_checks, usage, notes)
+
+    return orchestrator_with_tools_node
 
 
 # ── HITL checkpoint nodes (no LLM calls) ───────────────────────────────────
@@ -683,7 +779,7 @@ def make_specialist_node(persona_name: str, config: dict, model, tools: list, su
     failure_policy = _failure_policy(config)
     summary_model = summary_model or model
 
-    async def specialist_node(state: GraphState):
+    async def specialist_node(state: GraphState, config: RunnableConfig = None):
         agent_instructions = (
             state.get("agent_assignments", {}).get(persona_name)
             or state.get("next_instructions")
@@ -706,6 +802,8 @@ def make_specialist_node(persona_name: str, config: dict, model, tools: list, su
                 [SystemMessage(content=system_prompt), context],
                 max_rounds,
                 summary_model=summary_model,
+                agent_name=persona_name,
+                config=config,
             )
             final_text = _message_text(response)
             brief = final_text[:150] + "…" if len(final_text) > 150 else final_text
@@ -747,7 +845,7 @@ def make_journalist_node(config: dict, model, tools: list, summary_model=None):
     # Rendered once at build time: a broken template fails before any API spend.
     brief = build_journalist_brief(config, [getattr(t, "name", "") for t in tools])
 
-    async def journalist_node(state: GraphState):
+    async def journalist_node(state: GraphState, config: RunnableConfig = None):
         agent_outputs = state.get("agent_outputs", {})
         sections = [
             f"RESEARCH TASK:\n{state['task']}",
@@ -772,6 +870,8 @@ def make_journalist_node(config: dict, model, tools: list, summary_model=None):
                 [SystemMessage(content=system_prompt), context],
                 max_rounds,
                 summary_model=summary_model,
+                agent_name=journalist_name,
+                config=config,
             )
             final_text = _message_text(response)
             status = f"[Journalist draft — {len(final_text)} chars]"
@@ -909,9 +1009,19 @@ def build_graph(config: dict = None):
     workflow = StateGraph(GraphState)
 
     # ── Register orchestrator ────────────────────────────────────────────
+    # The orchestrator persona's tools are only loaded with orchestrator.allow_tools: true;
+    # by default the orchestrator only routes (audit B11).
+    orchestrator_tools, orchestrator_tool_model = [], None
+    if config["orchestrator"].get("allow_tools", False) is True:
+        orchestrator_tools = load_tools_for_persona(config, get_persona_config(config, orchestrator_name))
+        if orchestrator_tools:
+            orchestrator_tool_model = base_model.bind_tools(orchestrator_tools)
     workflow.add_node(
         "orchestrator",
-        make_orchestrator_node(config, specialist_names, orchestrator_routing_model),
+        make_orchestrator_node(
+            config, specialist_names, orchestrator_routing_model,
+            tool_model=orchestrator_tool_model, tools=orchestrator_tools, summary_model=base_model,
+        ),
     )
 
     # ── Register specialists (each with pre-bound tool set) ──────────────

@@ -1096,3 +1096,296 @@ def test_doctor_rejects_a_run_log_that_is_a_directory(tmp_path):
     (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
     errors = [i.message for i in inspect_swarm(tmp_path).issues if i.severity == "error"]
     assert any("swarm.run_log points to a directory" in m for m in errors)
+
+
+# ── 12. Provenance and orchestrator tools (B11, B12) ──────────────────────
+
+MATRIX_HEADER = "| Source | Author/Agent | Claim | Method | Epistemic Tag |\n|--|--|--|--|--|\n"
+
+
+class CallsToolOnce(FakeChat):
+    """Each tool-bound persona issues one ``tool_name`` call, then answers with the result it saw."""
+
+    def __init__(self, decisions, tool_name, args, **kwargs):
+        super().__init__(decisions, **kwargs)
+        self.tool_name, self.args = tool_name, args
+
+    async def ainvoke(self, msgs, _bound=False, **kwargs):
+        name = self.persona(msgs)
+        seen = [m.content for m in msgs if isinstance(m, ToolMessage)]
+        if not _bound or name in self.fail_for:
+            return await super().ainvoke(msgs, _bound=_bound)
+        self.calls.append((name, msgs))
+        self.bound_flags.append(_bound)
+        if seen:
+            return AIMessage(content=f"{name} checked: {seen[-1]}", usage_metadata=USAGE)
+        self.n += 1
+        return AIMessage(content="", usage_metadata=USAGE,
+                         tool_calls=[{"name": self.tool_name, "args": self.args, "id": f"t{self.n}"}])
+
+
+def _matrix(tmp_path):
+    matrix = tmp_path / "M.md"
+    matrix.write_text(MATRIX_HEADER, encoding="utf-8")
+    return matrix, {"swarm": {"output_dir": str(tmp_path), "traceability_matrix": str(matrix)}}
+
+
+def _matrix_rows(matrix):
+    return matrix.read_text(encoding="utf-8").splitlines()[2:]
+
+
+TRACE_ARGS = {"fact": "f", "source": "s", "epistemic_tag": "[FACT]"}
+
+
+def _trace_chat(decisions, **kwargs):
+    return CallsToolOnce(decisions, "append_traceability_matrix", TRACE_ARGS, **kwargs)
+
+
+def test_specialist_matrix_row_names_the_calling_persona(tmp_path):
+    """AUDIT B12: the row records the specialist that logged it, not 'Auto-Agent'."""
+    from automation.tools import append_traceability_matrix
+    matrix, cfg = _matrix(tmp_path)
+    chat = _trace_chat([decision(["A"]), decision(["Journalist"])])
+    graph = build(make_config(), chat, tools_for={"A": [append_traceability_matrix]})
+    with patch("automation.config.load_config", return_value=cfg):
+        state = run(graph)
+    rows = _matrix_rows(matrix)
+    assert len(rows) == 1 and "| **A** |" in rows[0]
+    assert "SUCCESS" in state["agent_outputs"]["A"]
+
+
+def test_parallel_specialists_each_log_their_own_row(tmp_path):
+    """Send fan-out: both rows survive (appends are serialised) and each names its persona."""
+    from automation.tools import append_traceability_matrix
+    matrix, cfg = _matrix(tmp_path)
+    for _ in range(5):
+        matrix.write_text(MATRIX_HEADER, encoding="utf-8")
+        chat = _trace_chat([decision(["A", "B"], assignments={"A": "a", "B": "b"}), decision(["Journalist"])])
+        graph = build(make_config(), chat, tools_for={"A": [append_traceability_matrix],
+                                                      "B": [append_traceability_matrix]})
+        with patch("automation.config.load_config", return_value=cfg):
+            run(graph)
+        rows = _matrix_rows(matrix)
+        assert sorted(r.split(" | ")[1] for r in rows) == ["**A**", "**B**"]
+
+
+def test_journalist_matrix_row_names_the_journalist_persona(tmp_path):
+    """The Journalist node is called 'Journalist'; the row must carry the persona name from the config."""
+    from automation.tools import append_traceability_matrix
+    matrix, cfg = _matrix(tmp_path)
+    config = make_config()
+    config["personas"][-1]["name"] = "Scribe"
+    config["orchestrator"]["journalist"] = "Scribe"
+    chat = _trace_chat([decision(["Journalist"])])
+    graph = build(config, chat, tools_for={"Scribe": [append_traceability_matrix]})
+    with patch("automation.config.load_config", return_value=cfg):
+        run(graph)
+    rows = _matrix_rows(matrix)
+    assert len(rows) == 1 and "| **Scribe** |" in rows[0]
+
+
+def test_matrix_row_without_a_persona_says_auto_agent(tmp_path):
+    from automation.tools import append_traceability_matrix
+    matrix, cfg = _matrix(tmp_path)
+    with patch("automation.config.load_config", return_value=cfg):
+        append_traceability_matrix.invoke(TRACE_ARGS)
+    assert "| **Auto-Agent** |" in _matrix_rows(matrix)[0]
+
+
+def test_matrix_row_reads_and_escapes_the_persona_from_config_metadata(tmp_path):
+    from automation.tools import append_traceability_matrix
+    matrix, cfg = _matrix(tmp_path)
+    with patch("automation.config.load_config", return_value=cfg):
+        append_traceability_matrix.invoke(TRACE_ARGS, config={"metadata": {"murmuration_agent": "Dr. X | Lab"}})
+    row = _matrix_rows(matrix)[0]
+    assert "| **Dr. X \\| Lab** |" in row
+    assert row.count("|") - row.count("\\|") == 6
+
+
+def test_traceability_tool_schema_is_unchanged():
+    """The injected RunnableConfig parameter must not be visible to the model."""
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    from automation.tools import append_traceability_matrix
+    assert set(append_traceability_matrix.args) == {"fact", "source", "epistemic_tag"}
+    params = convert_to_openai_tool(append_traceability_matrix)["function"]["parameters"]
+    assert set(params["properties"]) == {"fact", "source", "epistemic_tag"}
+    assert set(params.get("required", [])) == {"fact", "source", "epistemic_tag"}
+
+
+def test_tool_metadata_merges_with_the_node_config():
+    """A config passed to ToolNode replaces the parent's metadata; it must be merged, not dropped."""
+    from automation.graph import _tool_run_config
+    parent = {"metadata": {"thread": "t1"}, "configurable": {"thread_id": "t1"}, "run_id": "r"}
+    cfg = _tool_run_config(parent, "A")
+    assert cfg["metadata"] == {"thread": "t1", "murmuration_agent": "A"}
+    assert cfg["configurable"] == {"thread_id": "t1"} and "run_id" not in cfg
+    assert parent["metadata"] == {"thread": "t1"}
+    assert _tool_run_config(None, None) is None
+
+
+def _orch_tools_config(allow_tools, **kwargs):
+    config = make_config(**kwargs)
+    config["orchestrator"]["allow_tools"] = allow_tools
+    return config
+
+
+def test_orchestrator_tool_loop_runs_before_routing_when_allowed(tmp_path):
+    """AUDIT B11: with allow_tools the orchestrator's quick checks reach the routing prompt."""
+    from automation.tools import append_traceability_matrix
+    matrix, cfg = _matrix(tmp_path)
+    tools_for = {"Orch": [append_traceability_matrix]}
+
+    off = _trace_chat([decision(["Journalist"])])
+    with patch("automation.config.load_config", return_value=cfg):
+        state_off = run(build(_orch_tools_config(False), off, tools_for=tools_for))
+    assert off.count("Orch") == 0 and _matrix_rows(matrix) == []
+
+    on = _trace_chat([decision(["Journalist"])])
+    with patch("automation.config.load_config", return_value=cfg):
+        state_on = run(build(_orch_tools_config(True), on, tools_for=tools_for))
+    orch_flags = [bound for (name, _), bound in zip(on.calls, on.bound_flags) if name == "Orch"]
+    assert orch_flags == [True, True]                       # one tool round, then the report
+    routing_prompt = on.router.calls[0][1].content
+    assert "YOUR QUICK CHECKS" in routing_prompt and "Orch checked: SUCCESS" in routing_prompt
+    assert "YOUR QUICK CHECKS" not in off.router.calls[0][1].content
+    assert "| **Orch** |" in _matrix_rows(matrix)[0]
+    extra = state_on["token_usage"]["total_tokens"] - state_off["token_usage"]["total_tokens"]
+    assert extra == USAGE["total_tokens"] * on.count("Orch")
+
+
+def test_orchestrator_tools_only_loaded_and_bound_when_allowed():
+    seen = []
+    bound = []
+
+    class Recording(FakeChat):
+        def bind_tools(self, tools, **kwargs):
+            bound.append([t.name for t in tools])
+            return super().bind_tools(tools, **kwargs)
+
+    for allow in (False, True):
+        seen.clear()
+        bound.clear()
+        with patch("automation.graph.create_model", return_value=Recording([decision(["Journalist"])])), \
+             patch("automation.graph.create_reviewer_model", return_value=FakeReviewer()), \
+             patch("automation.config.load_persona_content", return_value="persona"), \
+             patch("automation.graph.load_tools_for_persona",
+                   side_effect=lambda c, p: seen.append(p["name"]) or ([dummy_tool] if p["name"] == "Orch" else [])):
+            build_graph(_orch_tools_config(allow))
+        assert ("Orch" in seen) is allow
+        assert bound == ([["dummy_tool"]] if allow else [])
+
+
+def test_orchestrator_quick_checks_skip_the_safety_valve_pass():
+    chat = FakeChat([decision(["A"]), decision(["Journalist"])], tool_calls=True)
+    graph = build(_orch_tools_config(True, max_agent_calls=1, max_rounds=1), chat, tools_for={"Orch": [dummy_tool]})
+    state = run(graph)
+    assert len(chat.router.calls) == 1                     # the second pass is the safety valve
+    orch_flags = [bound for (name, _), bound in zip(chat.calls, chat.bound_flags) if name == "Orch"]
+    assert orch_flags == [True, False]                     # one loop: 1 tool round + no-tools summary
+    assert "safety valve" in state["routing_reasoning"]
+
+
+def test_orchestrator_tool_failure_is_noted_under_continue():
+    chat = FakeChat([decision(["A"]), decision(["Journalist"])], fail_for={"Orch"})
+    graph = build(_orch_tools_config(True), chat, tools_for={"Orch": [dummy_tool]})
+    state = run(graph)
+    first = state["messages"][0].content
+    assert "quick checks failed (RuntimeError: simulated API failure in Orch)" in first
+    assert "YOUR QUICK CHECKS" not in chat.router.calls[0][1].content
+    assert state["final_status"] == "approved"
+
+
+def test_orchestrator_tool_failure_raises_under_abort():
+    config = _orch_tools_config(True)
+    config["orchestrator"]["on_agent_failure"] = "abort"
+    chat = FakeChat([decision(["A"]), decision(["Journalist"])], fail_for={"Orch"})
+    graph = build(config, chat, tools_for={"Orch": [dummy_tool]})
+    with pytest.raises(RuntimeError, match="simulated API failure in Orch"):
+        run(graph)
+
+
+def test_orchestrator_tool_loop_lets_graph_interrupts_propagate():
+    from langgraph.errors import GraphBubbleUp, GraphInterrupt
+
+    class Interrupting:
+        async def ainvoke(self, msgs, **kwargs):
+            raise GraphInterrupt(())
+
+    with patch("automation.config.load_persona_content", return_value="persona"):
+        node = make_orchestrator_node(_orch_tools_config(True), ["A", "B"], ScriptedRouter([decision(["A"])]),
+                                      tool_model=Interrupting(), tools=[dummy_tool])
+    with pytest.raises(GraphBubbleUp):
+        asyncio.run(node(initial_state()))
+
+
+def test_orchestrator_without_allow_tools_stays_a_sync_router():
+    """Default: no tools loaded, the routing prompt has no quick-checks block."""
+    with patch("automation.config.load_persona_content", return_value="persona"):
+        node = make_orchestrator_node(make_config(), ["A", "B"], ScriptedRouter([decision(["A"])]))
+    assert not asyncio.iscoroutinefunction(node)
+    out = node(initial_state())
+    assert out["next_agents"] == ["A"]
+
+
+def test_recursion_limit_ignores_allow_tools():
+    """The orchestrator's tool loop runs inside its node: no extra graph steps."""
+    from automation.graph import compute_recursion_limit
+    assert compute_recursion_limit(_orch_tools_config(True)) == compute_recursion_limit(make_config())
+
+
+def test_load_config_rejects_non_bool_allow_tools(tmp_path):
+    import yaml
+
+    from automation.config import CONFIG_PATH, load_config
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["orchestrator"]["allow_tools"] = "yes"
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    with pytest.raises(ValueError, match="orchestrator.allow_tools"):
+        load_config(tmp_path / "swarm_config.yml")
+    real["orchestrator"]["allow_tools"] = True
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    assert load_config(tmp_path / "swarm_config.yml")["orchestrator"]["allow_tools"] is True
+
+
+def test_doctor_orchestrator_tool_warnings_never_contradict(tmp_path):
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH
+    base = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    orch = base["orchestrator"]["agent"]
+
+    def warnings_for(allow, tools):
+        cfg = yaml.safe_load(yaml.safe_dump(base))
+        if allow is not None:
+            cfg["orchestrator"]["allow_tools"] = allow
+        next(p for p in cfg["personas"] if p["name"] == orch)["tools"] = tools
+        (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+        messages = [i.message for i in inspect_swarm(tmp_path).issues if i.severity == "warning"]
+        ignored = [m for m in messages if m.startswith(f"orchestrator '{orch}'") and "allow_tools: true" in m]
+        weak = [m for m in messages if m.startswith(f"orchestrator '{orch}' has no discovery-oriented tools")]
+        return len(ignored), len(weak)
+
+    assert warnings_for(None, ["search_web", "append_traceability"]) == (1, 0)   # root default: tools ignored
+    assert warnings_for(False, ["append_traceability"]) == (1, 0)
+    assert warnings_for(True, ["search_web", "append_traceability"]) == (0, 0)
+    assert warnings_for(True, ["append_traceability"]) == (0, 1)                 # tools matter only when on
+
+
+def test_builder_round_trip_preserves_allow_tools(tmp_path):
+    import shutil
+    from pathlib import Path
+
+    import yaml
+
+    from automation.builder.generator import render_swarm_config
+    from automation.builder.loader import load_swarm_spec_from_disk
+    root = Path(__file__).resolve().parents[1]
+    cfg = yaml.safe_load((root / "examples/toxicology/swarm_config.yml").read_text(encoding="utf-8"))
+    shutil.copytree(root / "examples/toxicology", tmp_path / "examples/toxicology")
+    for value in (True, False):
+        cfg["orchestrator"]["allow_tools"] = value
+        (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+        out = yaml.safe_load(render_swarm_config(load_swarm_spec_from_disk(tmp_path)))
+        assert out["orchestrator"]["allow_tools"] is value

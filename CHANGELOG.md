@@ -34,10 +34,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Builder commands (`persona add`, `team configure`, …) no longer drop config keys they do not model, such as `output_sections`, `reviewer.custom_prompt` or a cross-provider `reviewer.model.provider`.
   - Message content returned as a list of blocks (Anthropic-style) is handled by the reviewer and all agents.
 
+- **Traceability provenance** (audit finding B12): matrix rows written by `append_traceability_matrix` name the persona that logged them (specialist, Journalist or orchestrator) instead of `**Auto-Agent**`. The graph node passes the persona name to its tools in the `RunnableConfig` metadata; a call made outside the graph still writes `Auto-Agent`. The tool's arguments are unchanged.
+
 ### Added
 - **`swarm.run_log`** (default `false`): a JSON Lines record of every node update — routing decision and reasoning, assignments, reviewer verdict and feedback, HITL answers, token deltas and `final_status` — plus run start and end, including crashes (audit R6).
 - **`swarm.persist_findings`** (default `false`): each specialist's findings are written to `<output_dir>/findings/<persona-slug>.md` as soon as it reports, so a crash before the Journalist keeps them (audit I5).
 - **`orchestrator.on_agent_failure`**: `continue` (default) records a failed agent and keeps going; `abort` stops on the first error.
+- **`orchestrator.allow_tools`** (audit finding B11): when `true`, the orchestrator persona runs a bounded tool loop with its own tools before each routing decision and the routing prompt includes its short report. Default `false` keeps today's behaviour (the orchestrator's tools are not loaded); `swarm doctor` now warns when the orchestrator lists tools that are ignored for that reason. The toxicology, FAIR-NAMs and PIU examples opt in.
 - `execute` and `report` print whether the draft was approved, force-approved after `reviewer.max_revision_loops`, or overridden by the user, and exit with code 1 when no draft was produced.
 - **`journalist.brief`**: the Journalist's task instructions are now a Jinja2 template in `swarm_config.yml` (audit finding B2). The runtime previously hard-coded a psychiatry-specific requirement ("distinguish high engagement from clinical impairment") and two tool names for every domain. The default brief lists `reviewer.required_elements`; the toxicology and HCM examples render their `output_sections` lists, and the PIU example keeps the engagement-vs-impairment rule. `swarm doctor` renders the template and reports errors; the builder round-trips the key.
 - `orchestrator.max_findings_chars` and `orchestrator.max_peer_chars` (documented as commented defaults in `swarm_config.yml`).

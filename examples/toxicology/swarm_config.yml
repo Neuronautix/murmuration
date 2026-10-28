@@ -25,6 +25,9 @@ orchestrator:
   journalist: "TOCSAS Journalist"
   max_agent_calls: 10
   max_tool_rounds_per_agent: 6
+  # Let the orchestrator persona run quick checks with its listed tools before each
+  # routing decision; without this its tools are ignored (see doctor).
+  allow_tools: true
 
 # ── LLM Backend ─────────────────────────────────────
 model:
