@@ -155,6 +155,22 @@ def _validate_orchestrator_options(orchestrator: dict) -> None:
         raise ValueError(
             f"swarm_config.yml: orchestrator.allow_tools must be true or false, not {allow_tools!r}."
         )
+    early_stop = orchestrator.get("early_stop")
+    if early_stop is not None:
+        if not isinstance(early_stop, dict):
+            raise ValueError("swarm_config.yml: orchestrator.early_stop must be a mapping {enabled, min_rounds}.")
+        unknown = sorted(set(early_stop) - {"enabled", "min_rounds"})
+        if unknown:
+            raise ValueError(f"swarm_config.yml: orchestrator.early_stop.{unknown[0]} is not supported; "
+                             "use enabled and min_rounds.")
+        if not isinstance(early_stop.get("enabled", False), bool):
+            raise ValueError("swarm_config.yml: orchestrator.early_stop.enabled must be true or false.")
+        min_rounds = early_stop.get("min_rounds", 1)
+        if isinstance(min_rounds, bool) or not isinstance(min_rounds, int) or min_rounds < 1:
+            raise ValueError(
+                f"swarm_config.yml: orchestrator.early_stop.min_rounds must be a whole number of at least 1, "
+                f"not {min_rounds!r}."
+            )
     max_parallel = orchestrator.get("max_parallel_agents")
     if max_parallel is not None and (isinstance(max_parallel, bool) or not isinstance(max_parallel, int)
                                      or max_parallel < 1):

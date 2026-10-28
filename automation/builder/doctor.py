@@ -228,6 +228,22 @@ def _check_run_artefacts(report: SwarmDoctorReport, config: dict) -> None:
                 ))
 
 
+def _check_early_stop(report: SwarmDoctorReport, orchestrator: dict) -> None:
+    """early_stop.min_rounds at or above max_agent_calls can never be reached.
+
+    Each round uses at least one call, and the safety valve takes over once
+    max_agent_calls is reached, so the last LLM routing pass has at most
+    max_agent_calls - 1 rounds behind it.
+    """
+    early_stop = orchestrator.get("early_stop") or {}
+    min_rounds, max_calls = early_stop.get("min_rounds", 1), orchestrator.get("max_agent_calls", 8)
+    if early_stop.get("enabled") is True and isinstance(max_calls, int) and min_rounds >= max_calls:
+        report.issues.append(ValidationIssue(
+            "warning", f"orchestrator.early_stop.min_rounds ({min_rounds}) is not below max_agent_calls "
+            f"({max_calls}); early stop can never apply", "swarm_config.yml",
+        ))
+
+
 def _check_checkpointer(report: SwarmDoctorReport, config: dict) -> None:
     """checkpointer: the sqlite saver needs the optional extra; memory alone cannot resume a crash."""
     settings = get_checkpointer_config(config)
@@ -432,6 +448,7 @@ def inspect_swarm(root_dir: Path) -> SwarmDoctorReport:
     _check_run_artefacts(report, config)
     _check_persona_models(report, config)
     _check_checkpointer(report, config)
+    _check_early_stop(report, orchestrator_block)
     _check_traceability_coverage(
         report,
         personas,

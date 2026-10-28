@@ -164,6 +164,7 @@ class GraphState(TypedDict):
     routing_reasoning       The orchestrator's reasoning for its latest decision.
     plan_reviewed           True once the post_plan checkpoint has been answered.
     agent_call_count        Count of specialist invocations only (safety valve).
+    specialist_rounds       Orchestrator passes that dispatched at least one specialist.
     reviewer_approved       Set True once Reviewer-2 approves the Journalist draft.
     revision_count          Number of Journalist revision cycles completed.
     final_status            approved | force_approved | overridden | completed | failed.
@@ -180,6 +181,7 @@ class GraphState(TypedDict):
     routing_reasoning: str
     plan_reviewed: bool
     agent_call_count: int      # only incremented for specialist dispatches
+    specialist_rounds: int     # orchestrator passes that dispatched specialists (early stop)
     reviewer_approved: bool
     revision_count: int
     final_status: str
@@ -199,6 +201,9 @@ class OrchestratorDecision(BaseModel):
     next_agents: list[str]            # one name (sequential) or multiple (parallel)
     instructions: str                 # shared fallback used for single-agent routing
     assignments: list[AgentAssignment] = []  # per-agent instructions for parallel dispatch
+    # Read only with orchestrator.early_stop.enabled; the defaults keep older replies parsing.
+    sufficient_evidence: bool = False      # the findings already answer the task
+    coverage: str = ""                     # what the findings cover and what is still missing
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────
@@ -229,9 +234,37 @@ def _format_findings(agent_outputs: dict, compress: bool = False,
     for agent, output in agent_outputs.items():
         if agent == exclude:
             continue
-        body = (output[:max_chars] + "…") if compress and len(output) > max_chars else output
+        body = _truncate(output, max_chars) if compress else output
         parts.append(f"### [{agent}]\n{body}")
     return "\n\n".join(parts) if parts else "No findings from colleagues yet."
+
+
+_SENTENCE_END = re.compile(r"[.!?…][\"')\]]*(?=\s)")
+_WHITESPACE = re.compile(r"\s")
+
+
+def _truncate(text: str, max_chars: int) -> str:
+    """Shorten ``text`` to at most ``max_chars`` (plus "…"), ending at a boundary.
+
+    Prefers the last paragraph break, then the last sentence end, then the last
+    whitespace, as long as that keeps at least half of the budget; otherwise
+    (e.g. one very long token) it cuts at ``max_chars`` exactly, as before.
+    """
+    if len(text) <= max_chars:
+        return text
+    text = text.replace("\r\n", "\n")
+    if len(text) <= max_chars:
+        return text
+    head = text[:max_chars]
+    floor = max(1, max_chars // 2)
+    # One character of look-ahead, so a sentence ending exactly at the limit counts.
+    sentence_end = max((m.end() for m in _SENTENCE_END.finditer(text[:max_chars + 1])), default=-1)
+    for cut in (head.rfind("\n\n"),
+                sentence_end,
+                max((m.start() for m in _WHITESPACE.finditer(head)), default=-1)):
+        if cut >= floor:
+            return head[:cut].rstrip() + " …"
+    return head + "…"
 
 
 def _combine_findings(persona_name: str, previous: str, new: str) -> str:
@@ -470,6 +503,16 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
     system_prompt = build_agent_system_prompt(nexus_cfg)
     max_calls = config["orchestrator"].get("max_agent_calls", 8)
     max_findings_chars = config["orchestrator"].get("max_findings_chars", MAX_FINDINGS_CHARS)
+    early_stop_cfg = config["orchestrator"].get("early_stop") or {}
+    early_stop = early_stop_cfg.get("enabled", False) is True
+    min_rounds = early_stop_cfg.get("min_rounds", 1)
+    # Added to the routing prompt only when early stop is on, so the default prompt is unchanged.
+    early_stop_block = (
+        "\n\nEARLY STOP: if the findings already answer the task well enough to write it up, set\n"
+        "`sufficient_evidence` to true and summarise in `coverage` what the evidence covers and\n"
+        f"what is still missing. This is honoured once at least {min_rounds} specialist round(s) are done."
+        if early_stop else ""
+    )
     journalist_name = config["orchestrator"]["journalist"]
     failure_policy = _failure_policy(config)
     # 'END' is deliberately not a target: the orchestrator never runs after the
@@ -511,6 +554,7 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             }
 
         findings, consulted_note = routing_context(state)
+        rounds_done = state.get("specialist_rounds", 0)
         # Empty unless orchestrator.allow_tools is on, so the default prompt is unchanged.
         checks_block = (
             f"YOUR QUICK CHECKS (your own tool results, gathered before this decision):\n{quick_checks}\n\n"
@@ -533,6 +577,7 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             "    specific new sub-question requires it.\n"
             "Return: reasoning, next_agents (list), instructions (single-agent fallback),\n"
             "assignments (list of {agent, instructions} for parallel dispatch)."
+            f"{early_stop_block}"
         )
 
         routing_notes = list(check_notes)
@@ -586,6 +631,20 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             if a.agent in valid_targets
         }
 
+        early_stopped = False
+        if early_stop and decision.sufficient_evidence:
+            if rounds_done >= min_rounds:
+                if specialist_dispatches:
+                    routing_notes.append(f"early stop: evidence judged sufficient after {rounds_done} round(s); "
+                                         f"skipped {specialist_dispatches}")
+                    early_stopped = True
+                valid_next, specialist_dispatches = ["Journalist"], []
+            elif specialist_dispatches:
+                routing_notes.append(
+                    f"sufficient evidence claimed after {rounds_done} round(s); "
+                    f"early_stop.min_rounds is {min_rounds}, so continuing"
+                )
+
         if ignored_targets:
             routing_notes.append(f"ignored unknown targets {ignored_targets}")
         if specialist_dispatches and "Journalist" in valid_next:
@@ -603,8 +662,18 @@ def make_orchestrator_node(config: dict, specialist_names: list, routing_model,
             ))],
             "token_usage": _merge_token_usage(round_usage, check_usage) if check_usage else round_usage,
         }
-        if not specialist_dispatches:
-            update["journalist_instructions"] = assignments_dict.get("Journalist") or decision.instructions
+        if specialist_dispatches:
+            update["specialist_rounds"] = rounds_done + 1
+        else:
+            # After an early stop the decision's instructions were written for the skipped
+            # specialists, so the Journalist gets the generic synthesis brief instead.
+            instructions = (
+                "Synthesise all collected findings into a final structured report." if early_stopped
+                else assignments_dict.get("Journalist") or decision.instructions
+            )
+            if early_stop and decision.coverage:
+                instructions += f"\n\nEVIDENCE COVERAGE (orchestrator's assessment):\n{decision.coverage}"
+            update["journalist_instructions"] = instructions
         return update
 
     if not tools:
@@ -707,6 +776,10 @@ def make_post_plan_node(config: dict, specialist_names: list):
             update["next_agents"] = plan
             update["agent_call_count"] = (
                 state.get("agent_call_count", 0) - len(old_dispatches) + len(new_dispatches)
+            )
+            # The orchestrator counted a specialist round for its own plan (orchestrator.early_stop).
+            update["specialist_rounds"] = max(
+                0, state.get("specialist_rounds", 0) - bool(old_dispatches) + bool(new_dispatches)
             )
         if redirect_text:
             note = f"\n\nUSER REDIRECT: {redirect_text}"

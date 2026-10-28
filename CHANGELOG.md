@@ -37,6 +37,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Traceability provenance** (audit finding B12): matrix rows written by `append_traceability_matrix` name the persona that logged them (specialist, Journalist or orchestrator) instead of `**Auto-Agent**`. The graph node passes the persona name to its tools in the `RunnableConfig` metadata; a call made outside the graph still writes `Auto-Agent`. The tool's arguments are unchanged.
 
 ### Added
+- **`orchestrator.early_stop: {enabled, min_rounds}`** (default off): the orchestrator can declare the evidence sufficient (`sufficient_evidence`, `coverage` in its routing decision) and hand over to the Journalist early, once `min_rounds` specialist rounds are done (audit I4).
 - **`checkpointer: {type: none|memory|sqlite, path}`** and **`execute --resume <thread_id>`** / **`report --resume <thread_id>`** (audit R5). With `sqlite` the run state is saved to a file after every step, so a crashed, interrupted or paused run continues from a new process without repeating finished steps. The thread id is printed at start. Defaults are unchanged (`memory` with HITL, otherwise none). The SQLite saver is the optional `persist` extra (`pip install 'murmuration[persist]'`).
 - **`personas[].model`**: any persona (orchestrator and Journalist included) can use its own `{provider, name, temperature, env_key}`, merged over `model` like `reviewer.model` (audit I3). The builder preserves it; `execute` checks each persona's API key.
 - **`orchestrator.max_parallel_agents`** (default `null`, no limit): caps how many specialists run at once when the orchestrator dispatches several in parallel (audit R9).
@@ -53,6 +54,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `docs/dev/ORCHESTRATION_AUDIT.md`: verified audit of the orchestration layer with ranked recommendations.
 
 ### Changed
+- The findings views shown to the orchestrator (`max_findings_chars`) and to other specialists (`max_peer_chars`) now end at a paragraph, sentence or word boundary instead of mid-word, so they can be slightly shorter than the limit (audit I6).
 - **Renamed the project from Research Swarm to Murmuration.** The Python package is now `murmuration` (`pip show murmuration`) and HTTP tools send `User-Agent: Murmuration/1.0`. The CLI (`swarm`), import package (`automation`) and `swarm_config.yml` schema are unchanged.
 - Repository moved from `dhuzard/metodax` (METODAX) to `Neuronautix/murmuration`. Project URLs in `pyproject.toml`, `CITATION.cff`, README, QUICKSTART, CONTRIBUTING and FAQ now point to the new location; they previously pointed to `dhuzard/piu-psych-swarm`.
 

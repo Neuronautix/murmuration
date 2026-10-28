@@ -44,7 +44,8 @@ swarm:
 # max_findings_chars:       characters of each specialist's findings shown to the
 #                           orchestrator when it decides the next step (default 1500)
 # max_peer_chars:           characters of each colleague's findings shown to a
-#                           specialist as context (default 600)
+#                           specialist as context (default 600). Both views are cut
+#                           at a paragraph or sentence end, not mid-word
 # on_agent_failure:         what to do when an agent's model call fails (default
 #                           "continue": record the failure and keep the other
 #                           findings; "abort": stop the run on the first error)
@@ -52,6 +53,11 @@ swarm:
 #                           checks before each routing decision, bounded by
 #                           max_tool_rounds_per_agent (default false: its tools
 #                           are not loaded and it only routes)
+# early_stop:               {enabled, min_rounds}. When enabled, the orchestrator may
+#                           declare the evidence sufficient (with a coverage note for
+#                           the Journalist) and the run goes straight to the Journalist,
+#                           once min_rounds specialist rounds are done (default
+#                           {enabled: false, min_rounds: 1})
 # max_parallel_agents:      how many specialists may run at once when the orchestrator
 #                           dispatches several in parallel; the rest wait their
 #                           turn (default null: no limit). Helps with rate limits.
@@ -65,6 +71,9 @@ orchestrator:
   # on_agent_failure: continue
   # allow_tools: false
   # max_parallel_agents: 3
+  # early_stop:
+  #   enabled: true
+  #   min_rounds: 2
 
 # ── LLM Backend ─────────────────────────────────────
 # Supported providers: openai, anthropic, google

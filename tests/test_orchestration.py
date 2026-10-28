@@ -1873,3 +1873,139 @@ def test_default_sqlite_path_is_outside_output_dir_and_doctor_warns_otherwise(tm
     real["checkpointer"]["path"] = "./Drafts/state.sqlite"
     (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
     assert any("inside swarm.output_dir" in i.message for i in inspect_swarm(tmp_path).issues)
+
+
+# ── 15. Early stop and boundary-aware truncation (I4, I6) ──────────────────
+
+
+def stop_decision(agents, coverage="covers X; Y still open"):
+    return OrchestratorDecision(reasoning="enough", next_agents=agents, instructions="go",
+                                sufficient_evidence=True, coverage=coverage)
+
+
+def _early_stop_cfg(enabled=True, min_rounds=1):
+    cfg = make_config()
+    cfg["orchestrator"]["early_stop"] = {"enabled": enabled, "min_rounds": min_rounds}
+    return cfg
+
+
+def test_early_stop_hands_over_to_the_journalist_once_evidence_is_sufficient():
+    chat = FakeChat([decision(["A"]), stop_decision(["B"])])
+    state = run(build(_early_stop_cfg(), chat))
+    assert chat.count("B") == 0 and chat.count("Journalist") == 1
+    assert "EVIDENCE COVERAGE (orchestrator's assessment):\ncovers X; Y still open" in chat.human("Journalist")
+    assert "early stop: evidence judged sufficient after 1 round(s); skipped ['B']" in state["messages"][2].content
+    prompt = next(m for m in chat.router.calls[0] if isinstance(m, HumanMessage)).content
+    assert "EARLY STOP" in prompt and "at least 1 specialist round(s)" in prompt
+
+
+def test_early_stop_waits_for_min_rounds():
+    chat = FakeChat([stop_decision(["A"]), stop_decision(["B"]), decision(["Journalist"])])
+    state = run(build(_early_stop_cfg(min_rounds=2), chat))
+    assert chat.count("A") == 1 and chat.count("B") == 1       # round 1 ran despite the claim
+    assert "early_stop.min_rounds is 2, so continuing" in state["messages"][0].content
+    assert state["specialist_rounds"] == 2
+
+
+def test_early_stop_is_ignored_unless_enabled():
+    chat = FakeChat([decision(["A"]), stop_decision(["B"]), decision(["Journalist"])])
+    run(build(_early_stop_cfg(enabled=False), chat))
+    assert chat.count("B") == 1
+    prompt = next(m for m in chat.router.calls[0] if isinstance(m, HumanMessage)).content
+    assert "EARLY STOP" not in prompt and "EVIDENCE COVERAGE" not in chat.human("Journalist")
+
+
+@pytest.mark.parametrize("value, message", [
+    (True, "orchestrator.early_stop must be a mapping"),
+    ({"enabled": "yes"}, "orchestrator.early_stop.enabled"),
+    ({"enabled": True, "min_rounds": 0}, "orchestrator.early_stop.min_rounds"),
+    ({"enabled": True, "rounds": 2}, "orchestrator.early_stop.rounds is not supported"),
+])
+def test_load_config_rejects_bad_early_stop(tmp_path, value, message):
+    import yaml
+
+    from automation.config import CONFIG_PATH, load_config
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["orchestrator"]["early_stop"] = value
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        load_config(tmp_path / "swarm_config.yml")
+
+
+def test_peer_and_orchestrator_views_end_at_a_sentence_boundary():
+    cfg = make_config()
+    cfg["orchestrator"].update({"max_peer_chars": 60, "max_findings_chars": 60})
+    long = "Alpha finding is solid. Beta finding needs care. Gamma finding is speculative and long."
+    chat = FakeChat([decision(["A"]), decision(["B"]), decision(["Journalist"])])
+    graph = build(cfg, chat)
+    state = initial_state()
+    state["agent_outputs"] = {"Prior": long}
+    run(graph, state)
+    expected = "### [Prior]\nAlpha finding is solid. Beta finding needs care. …"
+    assert expected in chat.human("A")
+    assert expected in next(m for m in chat.router.calls[0] if isinstance(m, HumanMessage)).content
+    assert long in chat.human("Journalist")                    # the Journalist still reads everything
+
+
+def test_truncate_prefers_paragraphs_then_sentences_then_words():
+    from automation.graph import _truncate
+    assert _truncate("short", 10) == "short"
+    assert _truncate("Para one is here.\n\nPara two goes on", 30) == "Para one is here. …"
+    assert _truncate("One two three four five six", 20) == "One two three four …"
+    assert _truncate("x" * 50, 10) == "x" * 10 + "…"           # no boundary: hard cut, as before
+    assert _truncate("ab " + "y" * 40, 20) == "ab " + "y" * 17 + "…"   # boundary below half the budget
+
+
+def test_doctor_warns_when_early_stop_can_never_apply(tmp_path):
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["orchestrator"]["early_stop"] = {"enabled": True, "min_rounds": 20}
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    assert any("early stop can never apply" in i.message for i in inspect_swarm(tmp_path).issues)
+
+
+def test_early_stop_does_not_pass_the_skipped_specialists_instructions_to_the_journalist():
+    skipped = OrchestratorDecision(reasoning="enough", next_agents=["B"], instructions="Search for dosing trials",
+                                   sufficient_evidence=True, coverage="dosing covered")
+    chat = FakeChat([decision(["A"]), skipped])
+    run(build(_early_stop_cfg(), chat))
+    brief = chat.human("Journalist")
+    assert "Search for dosing trials" not in brief
+    assert "Synthesise all collected findings" in brief and "dosing covered" in brief
+
+
+def test_coverage_note_is_kept_when_the_orchestrator_routes_to_the_journalist_itself():
+    chat = FakeChat([stop_decision(["Journalist"], coverage="all covered")])
+    run(build(_early_stop_cfg(min_rounds=3), chat))
+    assert "EVIDENCE COVERAGE (orchestrator's assessment):\nall covered" in chat.human("Journalist")
+    assert "INSTRUCTIONS FROM THE ORCHESTRATOR:\ngo" in chat.human("Journalist")
+
+
+def test_post_plan_override_keeps_specialist_rounds_in_step():
+    out = post_plan("A", ("A", "B"), planned_state(["Journalist"], call_count=0))
+    assert out["specialist_rounds"] == 1
+    state = planned_state(["A"])
+    state["specialist_rounds"] = 1
+    assert post_plan("Journalist", ("A", "B"), state)["specialist_rounds"] == 0
+
+
+def test_truncate_handles_limits_crlf_and_tabs():
+    from automation.graph import _truncate
+    assert _truncate("Alpha. Beta gamma delta. More text here", 24) == "Alpha. Beta gamma delta. …"
+    assert _truncate("Para one is here.\r\n\r\nPara two goes on", 30) == "Para one is here. …"
+    assert _truncate("word\tword\tword\tword", 12) == "word\tword …"
+    assert _truncate("ab cd", 2) == "ab…"                   # a cut at position 0 is never used
+
+
+def test_doctor_warns_when_min_rounds_equals_max_agent_calls(tmp_path):
+    import yaml
+
+    from automation.builder.doctor import inspect_swarm
+    from automation.config import CONFIG_PATH
+    real = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    real["orchestrator"].update({"max_agent_calls": 2, "early_stop": {"enabled": True, "min_rounds": 2}})
+    (tmp_path / "swarm_config.yml").write_text(yaml.safe_dump(real), encoding="utf-8")
+    assert any("early stop can never apply" in i.message for i in inspect_swarm(tmp_path).issues)
