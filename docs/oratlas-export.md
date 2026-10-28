@@ -43,6 +43,10 @@ the matrix resolves through that same report bibliography. Paraphrases, ambiguou
 multi-work source cells, uncited claims and internal notes are skipped with a
 record ID and reason. Use separate matrix rows for separate works cited by the
 same claim. No fuzzy matching or inferred support judgments are performed.
+Direct report occurrences may cite multiple works: each identifier is matched
+independently against its matrix row, without treating nearby DOI/PMID values
+as aliases. Inline Markdown links are read by destination; their closing
+delimiter is excluded while parentheses within DOI suffixes are preserved.
 
 Report discovery accepts one `final_report.md` at the run root or below
 `Drafts/`. Matrix discovery accepts one `Knowledge_Traceability_Matrix*.md` or

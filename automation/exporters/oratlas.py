@@ -194,7 +194,48 @@ def _report_parts(text: str) -> tuple[list[dict], dict[str, str]]:
     return parts, references
 
 
+def _citation_text(source: str) -> str:
+    """Replace inline Markdown links with destinations, respecting nested parentheses."""
+    link = re.compile(r"!?\[[^\]\n]*\]\(")
+    result, start = [], 0
+    while match := link.search(source, start):
+        depth, end = 1, match.end()
+        while end < len(source) and depth:
+            if source[end] == "\\":
+                end += 2
+                continue
+            if source[end] == "(":
+                depth += 1
+            elif source[end] == ")":
+                depth -= 1
+            end += 1
+        if depth:
+            break  # An incomplete link is not a reliably delimited destination.
+        destination = source[match.end():end - 1].strip()
+        if destination.startswith("<") and ">" in destination:
+            destination = destination[1:destination.index(">")]
+        else:
+            destination = destination.split(maxsplit=1)[0] if destination else ""
+        destination = re.sub(r"\\([()])", r"\1", destination)
+        result.extend((source[start:match.start()], destination))
+        start = end
+    result.append(source[start:])
+    return "".join(result)
+
+
+def _report_citations(source: str) -> list[dict]:
+    """Read each directly cited identifier independently; proximity is not an alias binding."""
+    source = _citation_text(source)
+    records = [{"doi": normalize_doi(doi.rstrip(".,;"))} for doi in DOI.findall(source)]
+    records.extend({"pmid": str(int(pmid))} for pmid in PMID.findall(source))
+    for url in re.findall(r"https?://[^\s<>|]+", source):
+        if not DOI.search(url) and not PMID.search(url):
+            records.append({"url": url.rstrip(".,;")})
+    return list({canonical(record): record for record in records}.values())
+
+
 def _citation(source: str) -> dict:
+    source = _citation_text(source)
     if len(set(m.lower().rstrip(".,;") for m in DOI.findall(source))) > 1 or len(set(PMID.findall(source))) > 1:
         raise ValueError("ambiguous multi-work source; use separate traceability rows or numbered references")
     doi, pmid = DOI.search(source), PMID.search(source)
@@ -281,8 +322,9 @@ def export_oratlas(run: Path, out: Path, *, repository_url: str, title: str, abs
             for part in matches:
                 raw = part["raw"]
                 cited = [references[m] for m in re.findall(r"\[\d+\]", raw) if m in references]
-                report_sources = [_citation(s) for s in [raw, *cited] if DOI.search(s) or PMID.search(s)
-                                  or re.search(r"https?://", s)]
+                report_sources = _report_citations(raw)
+                report_sources.extend(_citation(s) for s in cited if DOI.search(s) or PMID.search(s)
+                                      or re.search(r"https?://", s))
                 row_source = _citation(source)
                 if any(any(row_source.get(k) == c.get(k) for k in row_source) for c in report_sources):
                     chosen = (part, row_source, report_sources)

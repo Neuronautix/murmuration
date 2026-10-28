@@ -6,6 +6,7 @@ from jsonschema import ValidationError
 
 from automation.exporters.oratlas import (
     SCHEMA,
+    _citation,
     _deduplicate,
     _merge_citation,
     canonical,
@@ -151,3 +152,52 @@ def test_legacy_live_search_matrix_and_qualification(tmp_path):
     assert result["counts"] == {"claims": 1, "citations": 1, "relations": 1}
     claim = json.loads((tmp_path / "out/knowledge/oratlas/claims.jsonl").read_text())
     assert "may" in claim["text"] and "[INFERENCE]" in claim["qualification"]
+
+
+@pytest.mark.parametrize("source", ["[1]", "doi:10.1038/example", "https://doi.org/10.1038/example"])
+@pytest.mark.parametrize("doi", ["10.1038/example", "10.1038/example(part)"])
+def test_markdown_doi_reference_preserves_suffix_parentheses(tmp_path, source, doi):
+    source = source.replace("10.1038/example", doi)
+    (tmp_path / "final_report.md").write_text(
+        f"## Results\nThe result may generalize [1].\n\n## References\n[1] [Paper](https://doi.org/{doi})\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "traceability.md").write_text(
+        "| claim | source |\n|---|---|\n" + f"| The result may generalize | {source} |\n",
+        encoding="utf-8",
+    )
+    result = export_oratlas(tmp_path, tmp_path / "out", **OPTIONS)
+    assert result == {"counts": {"claims": 1, "citations": 1, "relations": 1}, "skipped": []}
+    citation = json.loads((tmp_path / "out/knowledge/oratlas/citations.jsonl").read_text())
+    assert citation["doi"] == doi
+
+
+@pytest.mark.parametrize("sources", [
+    ["PMID:123", "PMID:456"],
+    ["doi:10.1038/first", "doi:10.1038/second(part)"],
+    ["[First](https://doi.org/10.1038/first)", "[Second](https://doi.org/10.1038/second(part))"],
+    ["https://example.org/first", "https://example.org/second"],
+    ["doi:10.1038/first", "PMID:456"],
+])
+def test_report_can_cite_multiple_works_with_separate_matrix_rows(tmp_path, sources):
+    (tmp_path / "final_report.md").write_text(
+        "## Results\n| claim | sources |\n|---|---|\n"
+        + f"| The result may generalize | {' '.join(sources)} |\n", encoding="utf-8",
+    )
+    (tmp_path / "traceability.md").write_text(
+        "| claim | source |\n|---|---|\n"
+        + "".join(f"| The result may generalize | {source} |\n" for source in sources), encoding="utf-8",
+    )
+    result = export_oratlas(tmp_path, tmp_path / "out", **OPTIONS)
+    assert result == {"counts": {"claims": 1, "citations": 2, "relations": 2}, "skipped": []}
+    assert check_export(tmp_path / "out") == result["counts"]
+
+
+@pytest.mark.parametrize("source", [
+    "[Paper](https://doi.org/10.1038/example(outer(inner)))",
+    '[Paper](<https://doi.org/10.1038/example(outer(inner))> "Title")',
+    r"[Paper](https://doi.org/10.1038/example\(outer\(inner\)\))",
+    "doi:10.1038/example(outer(inner))",
+])
+def test_doi_suffix_parentheses_are_not_stripped(source):
+    assert _citation(source) == {"doi": "10.1038/example(outer(inner))"}
